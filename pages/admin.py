@@ -1,0 +1,476 @@
+# pages/admin.py — Panel de administración completo
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from datetime import date, timedelta
+
+from utils.auth import verificar_password_admin
+from database.menu import (
+    obtener_todos_los_platos, crear_plato, actualizar_plato,
+    eliminar_plato, toggle_disponible, toggle_plato_del_dia, actualizar_imagen
+)
+from database.storage import subir_imagen, eliminar_imagen
+from database.tables_db import obtener_mesas, crear_mesa, eliminar_mesa
+from database.waiters_db import obtener_meseros, crear_mesero, eliminar_mesero
+from database.orders import (
+    obtener_ordenes_abiertas, obtener_items_orden,
+    cerrar_orden, obtener_ventas
+)
+from database.tables_db import actualizar_estado_mesa
+
+CATEGORIAS = ["Plato del día", "Parrilla", "Especiales", "Sopas", "Postres", "Otros"]
+
+
+def mostrar_vista_admin(restaurante: dict):
+    st.button("← Volver", on_click=_cerrar_sesion)
+    st.title(f"⚙️ Admin — {restaurante['name']}")
+
+    if not st.session_state.get("admin_autenticado"):
+        _pedir_password(restaurante)
+    else:
+        _panel_admin(restaurante)
+
+
+def _cerrar_sesion():
+    st.session_state.update({"modo": None, "admin_autenticado": False,
+                              "orden_cerrando_id": None})
+
+
+def _pedir_password(restaurante: dict):
+    with st.form("login_admin"):
+        st.subheader("Acceso de administrador")
+        password = st.text_input("Contraseña", type="password")
+        enviado = st.form_submit_button("Entrar")
+    if enviado:
+        if verificar_password_admin(password, restaurante["id"]):
+            st.session_state["admin_autenticado"] = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+
+
+def _panel_admin(restaurante: dict):
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📋 Órdenes activas",
+        "⏳ Pendientes",
+        "⭐ Plato del día",
+        "🍽️ Gestión de platos",
+        "⚙️ Configuración",
+        "📊 Dashboard",
+    ])
+    with tab1:
+        _tab_ordenes(restaurante)
+    with tab2:
+        _tab_pendientes(restaurante)
+    with tab3:
+        _tab_plato_del_dia(restaurante)
+    with tab4:
+        _tab_gestion_platos(restaurante)
+    with tab5:
+        _tab_configuracion(restaurante)
+    with tab6:
+        _tab_dashboard(restaurante)
+
+
+# ── Tab 1: Órdenes activas ────────────────────────────────────────────────────
+
+def _tab_ordenes(restaurante: dict):
+    st.markdown("### Órdenes activas")
+
+    # Pantalla de confirmación de cierre
+    if st.session_state.get("orden_cerrando_id"):
+        _pantalla_cierre(restaurante)
+        return
+
+    ordenes = obtener_ordenes_abiertas(restaurante["id"])
+
+    if not ordenes:
+        st.info("No hay órdenes activas en este momento.")
+        return
+
+    for orden in ordenes:
+        items = obtener_items_orden(orden["id"])
+        total = sum(i["unit_price"] * i["quantity"] for i in items)
+
+        with st.container(border=True):
+            col1, col2, col3 = st.columns([2, 2, 1])
+            with col1:
+                st.markdown(f"### 🪑 {orden['table_name']}")
+                st.caption(f"Mesero: {orden['waiter_name']}")
+            with col2:
+                st.markdown(f"**Total: 💲{total:,.0f}**")
+                st.caption(f"{len(items)} item(s)")
+            with col3:
+                if st.button("Cerrar cuenta", key=f"cerrar_{orden['id']}",
+                             type="primary", use_container_width=True):
+                    st.session_state["orden_cerrando_id"] = orden["id"]
+                    st.rerun()
+
+            # Detalle de items
+            with st.expander("Ver detalle"):
+                for item in items:
+                    entregado = "✅" if item.get("delivered") else "⏳"
+                    st.markdown(
+                        f"{entregado} {item['quantity']}x **{item['menu_item_name']}** "
+                        f"— 💲{item['unit_price'] * item['quantity']:,.0f}"
+                    )
+
+
+def _pantalla_cierre(restaurante: dict):
+    """Pantalla de confirmación antes de cerrar la cuenta."""
+    order_id = st.session_state["orden_cerrando_id"]
+    ordenes = obtener_ordenes_abiertas(restaurante["id"])
+    orden = next((o for o in ordenes if o["id"] == order_id), None)
+
+    if not orden:
+        st.session_state["orden_cerrando_id"] = None
+        st.rerun()
+        return
+
+    items = obtener_items_orden(order_id)
+    total = sum(i["unit_price"] * i["quantity"] for i in items)
+
+    st.markdown("---")
+    st.markdown(f"## 🧾 Cuenta — {orden['table_name']}")
+    st.caption(f"Atendida por: {orden['waiter_name']}")
+    st.markdown("---")
+
+    # Tabla resumen
+    for item in items:
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
+            st.markdown(item["menu_item_name"])
+        with col2:
+            st.markdown(f"x{item['quantity']}")
+        with col3:
+            st.markdown(f"💲{item['unit_price'] * item['quantity']:,.0f}")
+
+    st.markdown("---")
+    st.markdown(f"## TOTAL A PAGAR: 💲{total:,.0f}")
+    st.markdown("---")
+
+    col_confirmar, col_cancelar = st.columns(2)
+    with col_confirmar:
+        if st.button("✅ Confirmar pago y cerrar", type="primary",
+                     use_container_width=True):
+            cerrar_orden(order_id)
+            actualizar_estado_mesa(orden["table_id"], "available")
+            st.session_state["orden_cerrando_id"] = None
+            st.success(f"Cuenta cerrada. Total registrado: 💲{total:,.0f}")
+            st.rerun()
+    with col_cancelar:
+        if st.button("← Volver a órdenes", use_container_width=True):
+            st.session_state["orden_cerrando_id"] = None
+            st.rerun()
+
+
+# ── Tab 2: Pendientes ─────────────────────────────────────────────────────────
+
+def _tab_pendientes(restaurante: dict):
+    st.markdown("### ⏳ Items pendientes de entrega")
+    st.caption("Todo lo que los meseros aún no han llevado a las mesas.")
+
+    ordenes = obtener_ordenes_abiertas(restaurante["id"])
+    hay_pendientes = False
+
+    for orden in ordenes:
+        items = obtener_items_orden(orden["id"])
+        pendientes = [i for i in items if not i.get("delivered")]
+        if not pendientes:
+            continue
+
+        hay_pendientes = True
+        with st.container(border=True):
+            st.markdown(f"**🪑 {orden['table_name']}** — Mesero: {orden['waiter_name']}")
+            for item in pendientes:
+                col1, col2 = st.columns([5, 1])
+                with col1:
+                    nota = f" _(nota: {item['notes']})_" if item.get("notes") else ""
+                    st.markdown(f"• {item['quantity']}x **{item['menu_item_name']}**{nota}")
+                with col2:
+                    st.markdown("⏳ Pendiente")
+
+    if not hay_pendientes:
+        st.success("✅ Todo entregado. No hay pendientes.")
+
+
+# ── Tab 3: Plato del día ──────────────────────────────────────────────────────
+
+def _tab_plato_del_dia(restaurante: dict):
+    st.markdown("### Selecciona los platos del día")
+    st.caption("Los activados aparecen primero. Se agrupan por sección.")
+
+    platos = obtener_todos_los_platos(restaurante["id"])
+    if not platos:
+        st.info("No hay platos creados aún.")
+        return
+
+    # Agrupar por categoría
+    categorias: dict[str, list] = {}
+    for p in platos:
+        cat = p.get("category") or "Otros"
+        categorias.setdefault(cat, []).append(p)
+
+    for categoria, items in categorias.items():
+        # Habilitados primero, luego el resto
+        ordenados = sorted(items, key=lambda x: not x.get("is_daily_special", False))
+        st.markdown(f"#### {categoria}")
+        for plato in ordenados:
+            es_del_dia = plato.get("is_daily_special", False)
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                prefijo = "⭐ " if es_del_dia else ""
+                st.markdown(f"{prefijo}**{plato['name']}**")
+            with col2:
+                st.markdown(f"💲{plato['price']:,.0f}")
+            with col3:
+                nuevo = st.toggle("Activo", value=es_del_dia,
+                                  key=f"daily_{plato['id']}", label_visibility="collapsed")
+                if nuevo != es_del_dia:
+                    toggle_plato_del_dia(plato["id"], nuevo)
+                    st.rerun()
+        st.divider()
+
+
+# ── Tab 4: Gestión de platos ──────────────────────────────────────────────────
+
+def _tab_gestion_platos(restaurante: dict):
+    st.markdown("### Platos del menú")
+
+    if st.button("➕ Nuevo plato", type="primary"):
+        st.session_state["mostrar_form_plato"] = True
+
+    if st.session_state.get("mostrar_form_plato"):
+        _form_crear_plato(restaurante)
+
+    st.divider()
+    _lista_platos(restaurante)
+
+
+def _form_crear_plato(restaurante: dict):
+    with st.form("form_crear_plato"):
+        st.subheader("Nuevo plato")
+        col1, col2 = st.columns(2)
+        with col1:
+            nombre = st.text_input("Nombre *")
+            categoria = st.selectbox("Categoría", options=CATEGORIAS)
+        with col2:
+            precio = st.number_input("Precio *", min_value=0.0, step=500.0)
+            disponible = st.checkbox("Disponible en menú", value=True)
+        descripcion = st.text_area("Descripción")
+
+        col_g, col_c = st.columns(2)
+        with col_g:
+            guardar = st.form_submit_button("Guardar", type="primary", use_container_width=True)
+        with col_c:
+            cancelar = st.form_submit_button("Cancelar", use_container_width=True)
+
+    if guardar:
+        if not nombre or precio <= 0:
+            st.error("El nombre y el precio son obligatorios.")
+        else:
+            plato = crear_plato(restaurante["id"], nombre, descripcion, precio, categoria)
+            if not disponible:
+                toggle_disponible(plato["id"], False)
+            st.session_state["mostrar_form_plato"] = False
+            st.success(f"Plato '{nombre}' creado.")
+            st.rerun()
+
+    if cancelar:
+        st.session_state["mostrar_form_plato"] = False
+        st.rerun()
+
+
+def _lista_platos(restaurante: dict):
+    platos = obtener_todos_los_platos(restaurante["id"])
+    if not platos:
+        st.info("No hay platos creados aún.")
+        return
+
+    # Agrupar por categoría respetando el orden de CATEGORIAS
+    por_categoria: dict[str, list] = {}
+    for p in platos:
+        cat = p.get("category") or "Otros"
+        por_categoria.setdefault(cat, []).append(p)
+
+    orden_cats = [c for c in CATEGORIAS if c in por_categoria]
+    extras = [c for c in por_categoria if c not in CATEGORIAS]
+
+    for cat in orden_cats + extras:
+        st.markdown(f"#### {cat}")
+        for plato in por_categoria[cat]:
+            with st.expander(f"{'✅' if plato['available'] else '❌'} {plato['name']} — 💲{plato['price']:,.0f}"):
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    with st.form(f"edit_{plato['id']}"):
+                        nombre = st.text_input("Nombre", value=plato["name"])
+                        descripcion = st.text_area("Descripción", value=plato.get("description") or "")
+                        col_p, col_c = st.columns(2)
+                        with col_p:
+                            precio = st.number_input("Precio", value=float(plato["price"]),
+                                                     min_value=0.0, step=500.0)
+                        with col_c:
+                            cat_actual = plato.get("category") or "Otros"
+                            idx = CATEGORIAS.index(cat_actual) if cat_actual in CATEGORIAS else len(CATEGORIAS) - 1
+                            categoria = st.selectbox("Categoría", options=CATEGORIAS, index=idx)
+                        disponible = st.checkbox("Disponible", value=plato["available"])
+
+                        col_g, col_e = st.columns(2)
+                        with col_g:
+                            guardar = st.form_submit_button("💾 Guardar", use_container_width=True)
+                        with col_e:
+                            eliminar = st.form_submit_button("🗑️ Eliminar", use_container_width=True)
+
+                    if guardar:
+                        actualizar_plato(plato["id"], {
+                            "name": nombre, "description": descripcion,
+                            "price": precio, "category": categoria, "available": disponible,
+                        })
+                        st.success("Guardado.")
+                        st.rerun()
+
+                    if eliminar:
+                        if plato.get("image_url"):
+                            eliminar_imagen(plato["image_url"])
+                        eliminar_plato(plato["id"])
+                        st.rerun()
+
+                with col2:
+                    st.markdown("**Imagen del plato**")
+                    if plato.get("image_url"):
+                        st.image(plato["image_url"], use_container_width=True)
+                        if st.button("🗑️ Quitar imagen", key=f"del_img_{plato['id']}"):
+                            eliminar_imagen(plato["image_url"])
+                            actualizar_imagen(plato["id"], None)
+                            st.rerun()
+                    else:
+                        st.caption("Sin imagen")
+
+                    archivo = st.file_uploader("Subir imagen", type=["jpg", "jpeg", "png", "webp"],
+                                               key=f"upload_{plato['id']}", label_visibility="collapsed")
+                    if archivo:
+                        extension = archivo.name.split(".")[-1].lower()
+                        with st.spinner("Subiendo..."):
+                            url = subir_imagen(archivo.read(), extension)
+                            if plato.get("image_url"):
+                                eliminar_imagen(plato["image_url"])
+                            actualizar_imagen(plato["id"], url)
+                        st.success("Imagen subida.")
+                        st.rerun()
+
+
+# ── Tab 4: Configuración ──────────────────────────────────────────────────────
+
+def _tab_configuracion(restaurante: dict):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("### 🪑 Mesas")
+        mesas = obtener_mesas(restaurante["id"])
+
+        with st.form("form_nueva_mesa"):
+            nombre_mesa = st.text_input("Nombre de la mesa", placeholder="Ej: Mesa 1, Barra, Terraza...")
+            if st.form_submit_button("Agregar mesa", use_container_width=True):
+                if nombre_mesa.strip():
+                    crear_mesa(restaurante["id"], nombre_mesa.strip())
+                    st.rerun()
+                else:
+                    st.error("Escribe un nombre.")
+
+        st.divider()
+        for mesa in mesas:
+            col_nombre, col_estado, col_del = st.columns([3, 2, 1])
+            with col_nombre:
+                st.markdown(f"**{mesa['name']}**")
+            with col_estado:
+                estado = "🟢 Libre" if mesa["status"] == "available" else "🔴 Ocupada"
+                st.caption(estado)
+            with col_del:
+                if mesa["status"] == "available":
+                    if st.button("🗑️", key=f"del_mesa_{mesa['id']}"):
+                        eliminar_mesa(mesa["id"])
+                        st.rerun()
+
+    with col2:
+        st.markdown("### 👤 Meseros")
+        meseros = obtener_meseros(restaurante["id"])
+
+        with st.form("form_nuevo_mesero"):
+            nombre_mesero = st.text_input("Nombre del mesero")
+            if st.form_submit_button("Agregar mesero", use_container_width=True):
+                if nombre_mesero.strip():
+                    crear_mesero(restaurante["id"], nombre_mesero.strip())
+                    st.rerun()
+                else:
+                    st.error("Escribe un nombre.")
+
+        st.divider()
+        for mesero in meseros:
+            col_nombre, col_del = st.columns([4, 1])
+            with col_nombre:
+                st.markdown(f"**{mesero['name']}**")
+            with col_del:
+                if st.button("🗑️", key=f"del_mesero_{mesero['id']}"):
+                    eliminar_mesero(mesero["id"])
+                    st.rerun()
+
+
+# ── Tab 5: Dashboard ──────────────────────────────────────────────────────────
+
+def _tab_dashboard(restaurante: dict):
+    st.markdown("### 📊 Dashboard de ventas")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        fecha_desde = st.date_input("Desde", value=date.today() - timedelta(days=30))
+    with col2:
+        fecha_hasta = st.date_input("Hasta", value=date.today())
+
+    ventas = obtener_ventas(
+        restaurante["id"],
+        fecha_desde.isoformat(),
+        fecha_hasta.isoformat(),
+    )
+
+    if not ventas:
+        st.info("No hay ventas registradas en ese período.")
+        return
+
+    df = pd.DataFrame(ventas)
+    df["closed_at"] = pd.to_datetime(df["closed_at"])
+    df["fecha"] = df["closed_at"].dt.date
+    df["total"] = df["total"].astype(float)
+
+    # KPIs
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total ventas", f"💲{df['total'].sum():,.0f}")
+    with col2:
+        st.metric("Cuentas cerradas", len(df))
+    with col3:
+        st.metric("Promedio por cuenta", f"💲{df['total'].mean():,.0f}")
+
+    st.divider()
+
+    # Ventas por día
+    ventas_dia = df.groupby("fecha")["total"].sum().reset_index()
+    ventas_dia.columns = ["Fecha", "Total"]
+    fig = px.bar(ventas_dia, x="Fecha", y="Total",
+                 title="Ventas por día", color_discrete_sequence=["#FF6B35"])
+    fig.update_layout(showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Ventas por mesero
+    ventas_mesero = df.groupby("waiter_name")["total"].sum().reset_index()
+    ventas_mesero.columns = ["Mesero", "Total"]
+    fig2 = px.pie(ventas_mesero, names="Mesero", values="Total",
+                  title="Ventas por mesero")
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # Tabla detalle
+    st.markdown("### Detalle de cuentas cerradas")
+    df_mostrar = df[["closed_at", "table_name", "waiter_name", "total"]].copy()
+    df_mostrar.columns = ["Fecha/Hora", "Mesa", "Mesero", "Total"]
+    df_mostrar["Total"] = df_mostrar["Total"].apply(lambda x: f"💲{x:,.0f}")
+    st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
