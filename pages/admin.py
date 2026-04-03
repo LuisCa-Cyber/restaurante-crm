@@ -85,7 +85,12 @@ def _tab_ordenes(restaurante: dict):
         _pantalla_cierre(restaurante)
         return
 
-    ordenes = obtener_ordenes_abiertas(restaurante["id"])
+    _ordenes_fragment(restaurante["id"])
+
+
+@st.fragment(run_every=5)
+def _ordenes_fragment(restaurant_id: str):
+    ordenes = obtener_ordenes_abiertas(restaurant_id)
     ahora = datetime.now(timezone.utc)
 
     if not ordenes:
@@ -208,11 +213,11 @@ def _pantalla_cierre(restaurante: dict):
 
 def _tab_pendientes(restaurante: dict):
     st.markdown("### ⏳ Items pendientes de entrega")
-    st.caption("🟢 < 5 min · 🟡 5-10 min · 🔴 > 10 min · Se actualiza cada 60 segundos")
+    st.caption("🟢 < 5 min · 🟡 5-10 min · 🔴 > 10 min · Se actualiza cada 5 segundos")
     _pendientes_fragment(restaurante["id"])
 
 
-@st.fragment(run_every=10)
+@st.fragment(run_every=5)
 def _pendientes_fragment(restaurant_id: str):
     ordenes = obtener_ordenes_abiertas(restaurant_id)
     hay_pendientes = False
