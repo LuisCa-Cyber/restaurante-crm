@@ -148,7 +148,7 @@ def _vista_orden(restaurante: dict, mesero: dict):
     if not platos:
         st.warning("No hay platos disponibles en el menú.")
     else:
-        carrito: dict[str, dict] = {}
+        carrito: list[dict] = []
 
         categorias: dict[str, list] = {}
         for p in platos:
@@ -177,37 +177,46 @@ def _vista_orden(restaurante: dict, mesero: dict):
                         )
 
                     if cantidad > 0:
-                        precio_final = precio_base
-                        nombre_final = plato["name"]
-
                         # Opción de sopa para categorías aplicables
                         if categoria in CATEGORIAS_CON_SOPA:
-                            con_sopa = st.checkbox(
-                                f"Con sopa (+💲{PRECIO_SOPA:,.0f})",
-                                key=f"sopa_{order_id}_{plato['id']}"
+                            con_sopa_qty = st.number_input(
+                                f"¿Cuántos con sopa? (+💲{PRECIO_SOPA:,.0f} c/u)",
+                                min_value=0, max_value=cantidad, value=0,
+                                key=f"sopa_{order_id}_{plato['id']}",
                             )
-                            if con_sopa:
-                                precio_final = precio_base + PRECIO_SOPA
-                                nombre_final = f"{plato['name']} (con sopa)"
+                        else:
+                            con_sopa_qty = 0
 
                         nota = st.text_input(
                             "Nota (opcional)",
                             placeholder="Ej: sin ensalada, extra papa...",
                             key=f"nota_{order_id}_{plato['id']}",
                         )
-                        carrito[plato["id"]] = {
-                            "menu_item_id": plato["id"],
-                            "menu_item_name": nombre_final,
-                            "unit_price": precio_final,
-                            "quantity": cantidad,
-                            "notes": nota.strip() if nota else None,
-                        }
+                        nota_val = nota.strip() if nota else None
+
+                        if con_sopa_qty > 0:
+                            carrito.append({
+                                "menu_item_id": plato["id"],
+                                "menu_item_name": f"{plato['name']} (con sopa)",
+                                "unit_price": precio_base + PRECIO_SOPA,
+                                "quantity": con_sopa_qty,
+                                "notes": nota_val,
+                            })
+                        sin_sopa_qty = cantidad - con_sopa_qty
+                        if sin_sopa_qty > 0:
+                            carrito.append({
+                                "menu_item_id": plato["id"],
+                                "menu_item_name": plato["name"],
+                                "unit_price": precio_base,
+                                "quantity": sin_sopa_qty,
+                                "notes": nota_val,
+                            })
 
         col_enviar, col_cancelar = st.columns(2)
         with col_enviar:
             if st.button("✅ Enviar pedido", type="primary", use_container_width=True,
                          disabled=len(carrito) == 0):
-                agregar_items(order_id, list(carrito.values()))
+                agregar_items(order_id, carrito)
                 st.session_state["vista_mesero"] = "mesas"
                 st.session_state["mesa_activa"] = None
                 st.session_state["orden_activa_id"] = None
