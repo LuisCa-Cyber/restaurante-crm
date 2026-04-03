@@ -2,10 +2,13 @@
 
 import streamlit as st
 import os
-from dotenv import load_dotenv
 
-# Carga .env en desarrollo local (en producción usa Streamlit Secrets)
-load_dotenv()
+# Carga .env solo en desarrollo local (en Streamlit Cloud no existe este módulo)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 
 def get_env(key: str) -> str:
