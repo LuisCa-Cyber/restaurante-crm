@@ -229,7 +229,7 @@ def _vista_pendientes(restaurante: dict, mesero: dict):
     _pendientes_mesero_fragment(restaurante["id"], mesero["id"])
 
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=10)
 def _pendientes_mesero_fragment(restaurant_id: str, waiter_id: str):
     mesas = obtener_mesas(restaurant_id)
     hay_pendientes = False

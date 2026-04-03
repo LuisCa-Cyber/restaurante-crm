@@ -212,7 +212,7 @@ def _tab_pendientes(restaurante: dict):
     _pendientes_fragment(restaurante["id"])
 
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=10)
 def _pendientes_fragment(restaurant_id: str):
     ordenes = obtener_ordenes_abiertas(restaurant_id)
     hay_pendientes = False
@@ -489,7 +489,8 @@ def _tab_dashboard(restaurante: dict):
         return
 
     df = pd.DataFrame(ventas)
-    df["closed_at"] = pd.to_datetime(df["closed_at"])
+    # Convertir a hora Colombia (UTC-5) para mostrar fechas correctas
+    df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True).dt.tz_convert("America/Bogota")
     df["fecha"] = df["closed_at"].dt.date
     df["total"] = df["total"].astype(float)
 

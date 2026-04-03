@@ -1,6 +1,9 @@
 # database/orders.py — Gestión de órdenes y sus items
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+# UTC-5 Colombia (no usa horario de verano)
+COL_TZ = timezone(timedelta(hours=-5))
 from database.supabase_client import get_supabase
 
 
@@ -155,17 +158,24 @@ def obtener_modificaciones(order_id: str) -> list:
 
 def obtener_ventas(restaurant_id: str, desde: str, hasta: str) -> list:
     """
-    Retorna órdenes cerradas en un rango de fechas.
+    Retorna órdenes cerradas en un rango de fechas (hora Colombia UTC-5).
     desde / hasta: strings en formato 'YYYY-MM-DD'
     """
     supabase = get_supabase()
+    # Convierte las fechas de Colombia a UTC para comparar correctamente en Supabase
+    desde_utc = desde + "T05:00:00Z"        # 00:00 COL = 05:00 UTC
+    hasta_utc = hasta + "T04:59:59Z"        # 23:59 COL del día siguiente = 04:59 UTC
+    # hasta_utc debe ser el día siguiente a las 04:59 UTC
+    hasta_dt = datetime.fromisoformat(hasta + "T00:00:00").replace(tzinfo=COL_TZ)
+    hasta_utc = (hasta_dt + timedelta(days=1) - timedelta(seconds=1)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     return (
         supabase.table("orders")
         .select("*")
         .eq("restaurant_id", restaurant_id)
         .eq("status", "closed")
-        .gte("closed_at", desde)
-        .lte("closed_at", hasta + "T23:59:59")
+        .gte("closed_at", desde_utc)
+        .lte("closed_at", hasta_utc)
         .order("closed_at")
         .execute()
         .data
