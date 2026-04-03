@@ -57,7 +57,7 @@ def _panel_admin(restaurante: dict):
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📋 Órdenes activas",
         "⏳ Pendientes",
-        "⭐ Plato del día",
+        "⭐ Platos del día",
         "🍽️ Gestión de platos",
         "⚙️ Configuración",
         "📊 Dashboard",

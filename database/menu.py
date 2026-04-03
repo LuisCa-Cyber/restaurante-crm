@@ -30,6 +30,21 @@ def obtener_platos_disponibles(restaurant_id: str) -> list:
     )
 
 
+def obtener_platos_del_dia(restaurant_id: str) -> list:
+    """Retorna solo los platos activados como plato del día (vista mesero)."""
+    supabase = get_supabase()
+    return (
+        supabase.table("menu_items")
+        .select("*")
+        .eq("restaurant_id", restaurant_id)
+        .eq("available", True)
+        .eq("is_daily_special", True)
+        .order("category")
+        .execute()
+        .data
+    )
+
+
 def crear_plato(restaurant_id: str, nombre: str, descripcion: str,
                 precio: float, categoria: str) -> dict:
     """Crea un nuevo plato. La imagen se puede agregar después."""

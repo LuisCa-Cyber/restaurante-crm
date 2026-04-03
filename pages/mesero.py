@@ -4,7 +4,7 @@ import streamlit as st
 from datetime import datetime, timezone
 from database.waiters_db import obtener_meseros
 from database.tables_db import obtener_mesas, actualizar_estado_mesa
-from database.menu import obtener_platos_disponibles
+from database.menu import obtener_platos_del_dia
 from database.orders import (
     crear_orden, obtener_orden_abierta_de_mesa,
     obtener_items_orden, agregar_items, marcar_item_entregado, cancelar_orden
@@ -143,7 +143,7 @@ def _vista_orden(restaurante: dict, mesero: dict):
 
     # Agregar nuevos items
     st.markdown("**Agregar al pedido:**")
-    platos = obtener_platos_disponibles(restaurante["id"])
+    platos = obtener_platos_del_dia(restaurante["id"])
 
     if not platos:
         st.warning("No hay platos disponibles en el menú.")
