@@ -19,7 +19,10 @@ from database.orders import (
     registrar_modificacion, obtener_modificaciones
 )
 
-CATEGORIAS = ["Plato del día", "Parrilla", "Especiales", "Sopas", "Adiciones", "Postres", "Otros"]
+CATEGORIAS = ["Sopas", "Plato del día", "Parrilla", "Adiciones", "Postres", "Otros"]
+
+# Categorías que aparecen en el tab de plato del día
+CATEGORIAS_PLATO_DIA = {"Sopas", "Plato del día", "Parrilla", "Adiciones", "Postres", "Otros"}
 
 
 def mostrar_vista_admin(restaurante: dict):
@@ -205,9 +208,13 @@ def _pantalla_cierre(restaurante: dict):
 
 def _tab_pendientes(restaurante: dict):
     st.markdown("### ⏳ Items pendientes de entrega")
-    st.caption("🟢 < 5 min · 🟡 5-10 min · 🔴 > 10 min")
+    st.caption("🟢 < 5 min · 🟡 5-10 min · 🔴 > 10 min · Se actualiza cada 60 segundos")
+    _pendientes_fragment(restaurante["id"])
 
-    ordenes = obtener_ordenes_abiertas(restaurante["id"])
+
+@st.fragment(run_every=60)
+def _pendientes_fragment(restaurant_id: str):
+    ordenes = obtener_ordenes_abiertas(restaurant_id)
     hay_pendientes = False
     ahora = datetime.now(timezone.utc)
 
@@ -247,15 +254,18 @@ def _tab_plato_del_dia(restaurante: dict):
         st.info("No hay platos creados aún.")
         return
 
-    # Agrupar por categoría
+    # Agrupar por categoría — solo las secciones definidas
     categorias: dict[str, list] = {}
     for p in platos:
         cat = p.get("category") or "Otros"
+        if cat not in CATEGORIAS_PLATO_DIA:
+            cat = "Otros"
         categorias.setdefault(cat, []).append(p)
 
-    for categoria, items in categorias.items():
+    orden = [c for c in CATEGORIAS if c in categorias]
+    for categoria in orden:
         # Habilitados primero, luego el resto
-        ordenados = sorted(items, key=lambda x: not x.get("is_daily_special", False))
+        ordenados = sorted(categorias[categoria], key=lambda x: not x.get("is_daily_special", False))
         st.markdown(f"#### {categoria}")
         for plato in ordenados:
             es_del_dia = plato.get("is_daily_special", False)

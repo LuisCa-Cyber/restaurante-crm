@@ -12,7 +12,10 @@ from database.orders import (
 
 # Categorías donde aplica la opción de sopa
 CATEGORIAS_CON_SOPA = {"Plato del día", "Parrilla"}
-PRECIO_SOPA = 2000  # adición por pedir sopa
+PRECIO_SOPA = 2000
+
+# Orden y filtro de categorías visibles en el menú
+CATEGORIAS_MENU = ["Sopas", "Plato del día", "Parrilla", "Adiciones", "Postres", "Otros"]
 
 
 def mostrar_vista_mesero(restaurante: dict):
@@ -149,10 +152,13 @@ def _vista_orden(restaurante: dict, mesero: dict):
 
         categorias: dict[str, list] = {}
         for p in platos:
-            cat = p.get("category") or "Sin categoría"
+            cat = p.get("category") or "Otros"
+            if cat not in CATEGORIAS_MENU:
+                cat = "Otros"
             categorias.setdefault(cat, []).append(p)
 
-        for categoria, items in categorias.items():
+        for categoria in [c for c in CATEGORIAS_MENU if c in categorias]:
+            items = categorias[categoria]
             with st.expander(categoria):
                 for plato in items:
                     col1, col2, col3 = st.columns([3, 1, 1])
@@ -219,9 +225,13 @@ def _vista_orden(restaurante: dict, mesero: dict):
 
 def _vista_pendientes(restaurante: dict, mesero: dict):
     st.markdown("### Lo que debes llevar")
-    st.caption("Marca cada item cuando lo entregues en la mesa.")
+    st.caption("🟢 < 5 min · 🟡 5-10 min · 🔴 > 10 min · Se actualiza cada 60 segundos")
+    _pendientes_mesero_fragment(restaurante["id"], mesero["id"])
 
-    mesas = obtener_mesas(restaurante["id"])
+
+@st.fragment(run_every=60)
+def _pendientes_mesero_fragment(restaurant_id: str, waiter_id: str):
+    mesas = obtener_mesas(restaurant_id)
     hay_pendientes = False
     ahora = datetime.now(timezone.utc)
 
@@ -229,7 +239,7 @@ def _vista_pendientes(restaurante: dict, mesero: dict):
         if mesa["status"] != "occupied":
             continue
         orden = obtener_orden_abierta_de_mesa(mesa["id"])
-        if not orden or orden["waiter_id"] != mesero["id"]:
+        if not orden or orden["waiter_id"] != waiter_id:
             continue
 
         items = obtener_items_orden(orden["id"])
@@ -240,7 +250,6 @@ def _vista_pendientes(restaurante: dict, mesero: dict):
         hay_pendientes = True
         st.markdown(f"**{mesa['name']}**")
         for item in pendientes:
-            # Calcular tiempo pendiente
             creado = datetime.fromisoformat(item["created_at"].replace("Z", "+00:00"))
             minutos = int((ahora - creado).total_seconds() / 60)
             alerta = "🔴" if minutos >= 10 else "🟡" if minutos >= 5 else "🟢"
