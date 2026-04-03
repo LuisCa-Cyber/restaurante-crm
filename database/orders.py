@@ -94,6 +94,15 @@ def marcar_item_entregado(item_id: str, entregado: bool):
     supabase.table("order_items").update({"delivered": entregado}).eq("id", item_id).execute()
 
 
+def cancelar_orden(order_id: str, table_id: str):
+    """Cancela una orden sin items (mesa quedó libre sin pedir). Libera la mesa."""
+    from database.tables_db import actualizar_estado_mesa
+    supabase = get_supabase()
+    supabase.table("order_items").delete().eq("order_id", order_id).execute()
+    supabase.table("orders").delete().eq("id", order_id).execute()
+    actualizar_estado_mesa(table_id, "available")
+
+
 def _recalcular_total(order_id: str):
     """Recalcula y guarda el total de la orden sumando todos sus items."""
     supabase = get_supabase()
@@ -115,6 +124,32 @@ def cerrar_orden(order_id: str) -> dict:
         .eq("id", order_id)
         .execute()
         .data[0]
+    )
+
+
+def registrar_modificacion(order_id: str, descripcion: str,
+                            total_original: float, total_nuevo: float):
+    """Registra una modificación manual a la cuenta con su justificación."""
+    supabase = get_supabase()
+    supabase.table("order_modifications").insert({
+        "order_id": order_id,
+        "description": descripcion,
+        "original_total": total_original,
+        "new_total": total_nuevo,
+    }).execute()
+    # Actualiza el total de la orden
+    supabase.table("orders").update({"total": total_nuevo}).eq("id", order_id).execute()
+
+
+def obtener_modificaciones(order_id: str) -> list:
+    supabase = get_supabase()
+    return (
+        supabase.table("order_modifications")
+        .select("*")
+        .eq("order_id", order_id)
+        .order("created_at")
+        .execute()
+        .data
     )
 
 

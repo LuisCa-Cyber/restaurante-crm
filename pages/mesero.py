@@ -1,25 +1,26 @@
 # pages/mesero.py — Vista del mesero: tomar pedidos y gestionar sus mesas
 
 import streamlit as st
+from datetime import datetime, timezone
 from database.waiters_db import obtener_meseros
 from database.tables_db import obtener_mesas, actualizar_estado_mesa
 from database.menu import obtener_platos_disponibles
 from database.orders import (
     crear_orden, obtener_orden_abierta_de_mesa,
-    obtener_items_orden, agregar_items, marcar_item_entregado
+    obtener_items_orden, agregar_items, marcar_item_entregado, cancelar_orden
 )
+
+# Categorías donde aplica la opción de sopa
+CATEGORIAS_CON_SOPA = {"Plato del día", "Parrilla"}
+PRECIO_SOPA = 2000  # adición por pedir sopa
 
 
 def mostrar_vista_mesero(restaurante: dict):
-    # Si no hay mesero seleccionado, mostrar selector
     if not st.session_state.get("mesero_activo"):
         _seleccionar_mesero(restaurante)
         return
 
     mesero = st.session_state["mesero_activo"]
-
-    # Navegación interna del mesero
-    vista = st.session_state.get("vista_mesero", "mesas")
 
     col_titulo, col_salir = st.columns([4, 1])
     with col_titulo:
@@ -27,18 +28,14 @@ def mostrar_vista_mesero(restaurante: dict):
     with col_salir:
         if st.button("Salir", use_container_width=True):
             st.session_state.update({
-                "modo": None,
-                "mesero_activo": None,
-                "vista_mesero": "mesas",
-                "mesa_activa": None,
+                "modo": None, "mesero_activo": None,
+                "vista_mesero": "mesas", "mesa_activa": None,
             })
             st.rerun()
 
     tab1, tab2 = st.tabs(["🪑 Mesas", "📋 Mis pendientes"])
-
     with tab1:
         _vista_mesas(restaurante, mesero)
-
     with tab2:
         _vista_pendientes(restaurante, mesero)
 
@@ -84,21 +81,28 @@ def _vista_mesas(restaurante: dict, mesero: dict):
             with st.container(border=True):
                 st.markdown(f"### {mesa['name']}")
                 if ocupada and orden:
-                    st.markdown(f"🔴 Ocupada")
+                    st.markdown("🔴 Ocupada")
                     st.caption(f"Mesero: {orden['waiter_name']}")
                     items = obtener_items_orden(orden["id"])
-                    st.caption(f"{len(items)} item(s) — 💲{orden['total']:,.0f}")
+                    st.caption(f"{len(items)} item(s)")
+
                     if st.button("Ver / Agregar", key=f"ver_{mesa['id']}",
                                  use_container_width=True):
                         st.session_state["mesa_activa"] = mesa
                         st.session_state["orden_activa_id"] = orden["id"]
                         st.session_state["vista_mesero"] = "orden"
                         st.rerun()
+
+                    # Solo el mesero que atiende la mesa puede liberarla
+                    if orden["waiter_id"] == mesero["id"]:
+                        if st.button("🚫 Liberar mesa", key=f"liberar_{mesa['id']}",
+                                     use_container_width=True):
+                            cancelar_orden(orden["id"], mesa["id"])
+                            st.rerun()
                 else:
                     st.markdown("🟢 Disponible")
                     if st.button("Atender", key=f"atender_{mesa['id']}",
                                  use_container_width=True, type="primary"):
-                        # Crear orden nueva
                         nueva_orden = crear_orden(
                             restaurante["id"], mesa["id"], mesa["name"],
                             mesero["id"], mesero["name"]
@@ -109,7 +113,6 @@ def _vista_mesas(restaurante: dict, mesero: dict):
                         st.session_state["vista_mesero"] = "orden"
                         st.rerun()
 
-    # Vista de tomar/agregar orden (debajo del grid)
     if st.session_state.get("vista_mesero") == "orden":
         st.divider()
         _vista_orden(restaurante, mesero)
@@ -158,7 +161,8 @@ def _vista_orden(restaurante: dict, mesero: dict):
                         if plato.get("description"):
                             st.caption(plato["description"])
                     with col2:
-                        st.markdown(f"💲{plato['price']:,.0f}")
+                        precio_base = float(plato["price"])
+                        st.markdown(f"💲{precio_base:,.0f}")
                     with col3:
                         cantidad = st.number_input(
                             "Cant.", min_value=0, max_value=20, value=0,
@@ -167,6 +171,19 @@ def _vista_orden(restaurante: dict, mesero: dict):
                         )
 
                     if cantidad > 0:
+                        precio_final = precio_base
+                        nombre_final = plato["name"]
+
+                        # Opción de sopa para categorías aplicables
+                        if categoria in CATEGORIAS_CON_SOPA:
+                            con_sopa = st.checkbox(
+                                f"Con sopa (+💲{PRECIO_SOPA:,.0f})",
+                                key=f"sopa_{order_id}_{plato['id']}"
+                            )
+                            if con_sopa:
+                                precio_final = precio_base + PRECIO_SOPA
+                                nombre_final = f"{plato['name']} (con sopa)"
+
                         nota = st.text_input(
                             "Nota (opcional)",
                             placeholder="Ej: sin ensalada, extra papa...",
@@ -174,8 +191,8 @@ def _vista_orden(restaurante: dict, mesero: dict):
                         )
                         carrito[plato["id"]] = {
                             "menu_item_id": plato["id"],
-                            "menu_item_name": plato["name"],
-                            "unit_price": float(plato["price"]),
+                            "menu_item_name": nombre_final,
+                            "unit_price": precio_final,
                             "quantity": cantidad,
                             "notes": nota.strip() if nota else None,
                         }
@@ -206,6 +223,7 @@ def _vista_pendientes(restaurante: dict, mesero: dict):
 
     mesas = obtener_mesas(restaurante["id"])
     hay_pendientes = False
+    ahora = datetime.now(timezone.utc)
 
     for mesa in mesas:
         if mesa["status"] != "occupied":
@@ -216,18 +234,25 @@ def _vista_pendientes(restaurante: dict, mesero: dict):
 
         items = obtener_items_orden(orden["id"])
         pendientes = [i for i in items if not i.get("delivered")]
-
         if not pendientes:
             continue
 
         hay_pendientes = True
         st.markdown(f"**{mesa['name']}**")
         for item in pendientes:
-            col1, col2 = st.columns([4, 1])
+            # Calcular tiempo pendiente
+            creado = datetime.fromisoformat(item["created_at"].replace("Z", "+00:00"))
+            minutos = int((ahora - creado).total_seconds() / 60)
+            alerta = "🔴" if minutos >= 10 else "🟡" if minutos >= 5 else "🟢"
+
+            col1, col2, col3 = st.columns([3, 1, 1])
             with col1:
-                st.markdown(f"{item['quantity']}x {item['menu_item_name']}")
+                nota = f" _(nota: {item['notes']})_" if item.get("notes") else ""
+                st.markdown(f"{item['quantity']}x **{item['menu_item_name']}**{nota}")
             with col2:
-                if st.button("✓ Entregado", key=f"entregado_{item['id']}",
+                st.markdown(f"{alerta} {minutos} min")
+            with col3:
+                if st.button("✓", key=f"entregado_{item['id']}",
                              use_container_width=True):
                     marcar_item_entregado(item["id"], True)
                     st.rerun()

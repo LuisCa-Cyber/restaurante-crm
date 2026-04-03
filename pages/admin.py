@@ -3,7 +3,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 
 from utils.auth import verificar_password_admin
 from database.menu import (
@@ -11,15 +11,15 @@ from database.menu import (
     eliminar_plato, toggle_disponible, toggle_plato_del_dia, actualizar_imagen
 )
 from database.storage import subir_imagen, eliminar_imagen
-from database.tables_db import obtener_mesas, crear_mesa, eliminar_mesa
+from database.tables_db import obtener_mesas, crear_mesa, eliminar_mesa, actualizar_estado_mesa
 from database.waiters_db import obtener_meseros, crear_mesero, eliminar_mesero
 from database.orders import (
     obtener_ordenes_abiertas, obtener_items_orden,
-    cerrar_orden, obtener_ventas
+    cerrar_orden, obtener_ventas, cancelar_orden,
+    registrar_modificacion, obtener_modificaciones
 )
-from database.tables_db import actualizar_estado_mesa
 
-CATEGORIAS = ["Plato del día", "Parrilla", "Especiales", "Sopas", "Postres", "Otros"]
+CATEGORIAS = ["Plato del día", "Parrilla", "Especiales", "Sopas", "Adiciones", "Postres", "Otros"]
 
 
 def mostrar_vista_admin(restaurante: dict):
@@ -78,12 +78,12 @@ def _panel_admin(restaurante: dict):
 def _tab_ordenes(restaurante: dict):
     st.markdown("### Órdenes activas")
 
-    # Pantalla de confirmación de cierre
     if st.session_state.get("orden_cerrando_id"):
         _pantalla_cierre(restaurante)
         return
 
     ordenes = obtener_ordenes_abiertas(restaurante["id"])
+    ahora = datetime.now(timezone.utc)
 
     if not ordenes:
         st.info("No hay órdenes activas en este momento.")
@@ -92,33 +92,40 @@ def _tab_ordenes(restaurante: dict):
     for orden in ordenes:
         items = obtener_items_orden(orden["id"])
         total = sum(i["unit_price"] * i["quantity"] for i in items)
+        creado = datetime.fromisoformat(orden["created_at"].replace("Z", "+00:00"))
+        minutos = int((ahora - creado).total_seconds() / 60)
 
         with st.container(border=True):
-            col1, col2, col3 = st.columns([2, 2, 1])
+            col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
             with col1:
                 st.markdown(f"### 🪑 {orden['table_name']}")
                 st.caption(f"Mesero: {orden['waiter_name']}")
             with col2:
                 st.markdown(f"**Total: 💲{total:,.0f}**")
-                st.caption(f"{len(items)} item(s)")
+                st.caption(f"{len(items)} item(s) · {minutos} min abierta")
             with col3:
                 if st.button("Cerrar cuenta", key=f"cerrar_{orden['id']}",
                              type="primary", use_container_width=True):
                     st.session_state["orden_cerrando_id"] = orden["id"]
                     st.rerun()
+            with col4:
+                if st.button("🚫 Liberar", key=f"liberar_admin_{orden['id']}",
+                             use_container_width=True):
+                    cancelar_orden(orden["id"], orden["table_id"])
+                    st.rerun()
 
-            # Detalle de items
             with st.expander("Ver detalle"):
                 for item in items:
                     entregado = "✅" if item.get("delivered") else "⏳"
+                    nota = f" _(nota: {item['notes']})_" if item.get("notes") else ""
                     st.markdown(
-                        f"{entregado} {item['quantity']}x **{item['menu_item_name']}** "
+                        f"{entregado} {item['quantity']}x **{item['menu_item_name']}**{nota} "
                         f"— 💲{item['unit_price'] * item['quantity']:,.0f}"
                     )
 
 
 def _pantalla_cierre(restaurante: dict):
-    """Pantalla de confirmación antes de cerrar la cuenta."""
+    """Pantalla de confirmación antes de cerrar la cuenta, con opción de modificar."""
     order_id = st.session_state["orden_cerrando_id"]
     ordenes = obtener_ordenes_abiertas(restaurante["id"])
     orden = next((o for o in ordenes if o["id"] == order_id), None)
@@ -131,24 +138,52 @@ def _pantalla_cierre(restaurante: dict):
     items = obtener_items_orden(order_id)
     total = sum(i["unit_price"] * i["quantity"] for i in items)
 
+    # Recuperar total modificado si existe en session_state
+    total_final = st.session_state.get(f"total_modificado_{order_id}", total)
+
     st.markdown("---")
     st.markdown(f"## 🧾 Cuenta — {orden['table_name']}")
     st.caption(f"Atendida por: {orden['waiter_name']}")
     st.markdown("---")
 
-    # Tabla resumen
     for item in items:
         col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
-            st.markdown(item["menu_item_name"])
+            nota = f" _(nota: {item['notes']})_" if item.get("notes") else ""
+            st.markdown(f"{item['menu_item_name']}{nota}")
         with col2:
             st.markdown(f"x{item['quantity']}")
         with col3:
             st.markdown(f"💲{item['unit_price'] * item['quantity']:,.0f}")
 
+    # Modificaciones previas
+    modificaciones = obtener_modificaciones(order_id)
+    if modificaciones:
+        st.markdown("**Modificaciones registradas:**")
+        for m in modificaciones:
+            st.caption(f"• {m['description']} (💲{m['original_total']:,.0f} → 💲{m['new_total']:,.0f})")
+
     st.markdown("---")
-    st.markdown(f"## TOTAL A PAGAR: 💲{total:,.0f}")
+    st.markdown(f"## TOTAL A PAGAR: 💲{total_final:,.0f}")
     st.markdown("---")
+
+    # Sección de modificación
+    with st.expander("✏️ Modificar total"):
+        with st.form("form_modificacion"):
+            nuevo_total = st.number_input("Nuevo total", value=float(total_final),
+                                          min_value=0.0, step=1000.0)
+            motivo = st.text_input("Motivo de la modificación *",
+                                   placeholder="Ej: descuento por error en pedido...")
+            aplicar = st.form_submit_button("Aplicar modificación")
+
+        if aplicar:
+            if not motivo.strip():
+                st.error("Debes escribir el motivo de la modificación.")
+            else:
+                registrar_modificacion(order_id, motivo.strip(), total_final, nuevo_total)
+                st.session_state[f"total_modificado_{order_id}"] = nuevo_total
+                st.success(f"Total modificado a 💲{nuevo_total:,.0f}. Motivo registrado.")
+                st.rerun()
 
     col_confirmar, col_cancelar = st.columns(2)
     with col_confirmar:
@@ -157,7 +192,8 @@ def _pantalla_cierre(restaurante: dict):
             cerrar_orden(order_id)
             actualizar_estado_mesa(orden["table_id"], "available")
             st.session_state["orden_cerrando_id"] = None
-            st.success(f"Cuenta cerrada. Total registrado: 💲{total:,.0f}")
+            st.session_state.pop(f"total_modificado_{order_id}", None)
+            st.success(f"Cuenta cerrada. Total registrado: 💲{total_final:,.0f}")
             st.rerun()
     with col_cancelar:
         if st.button("← Volver a órdenes", use_container_width=True):
@@ -169,10 +205,11 @@ def _pantalla_cierre(restaurante: dict):
 
 def _tab_pendientes(restaurante: dict):
     st.markdown("### ⏳ Items pendientes de entrega")
-    st.caption("Todo lo que los meseros aún no han llevado a las mesas.")
+    st.caption("🟢 < 5 min · 🟡 5-10 min · 🔴 > 10 min")
 
     ordenes = obtener_ordenes_abiertas(restaurante["id"])
     hay_pendientes = False
+    ahora = datetime.now(timezone.utc)
 
     for orden in ordenes:
         items = obtener_items_orden(orden["id"])
@@ -184,12 +221,16 @@ def _tab_pendientes(restaurante: dict):
         with st.container(border=True):
             st.markdown(f"**🪑 {orden['table_name']}** — Mesero: {orden['waiter_name']}")
             for item in pendientes:
+                creado = datetime.fromisoformat(item["created_at"].replace("Z", "+00:00"))
+                minutos = int((ahora - creado).total_seconds() / 60)
+                alerta = "🔴" if minutos >= 10 else "🟡" if minutos >= 5 else "🟢"
+
                 col1, col2 = st.columns([5, 1])
                 with col1:
                     nota = f" _(nota: {item['notes']})_" if item.get("notes") else ""
                     st.markdown(f"• {item['quantity']}x **{item['menu_item_name']}**{nota}")
                 with col2:
-                    st.markdown("⏳ Pendiente")
+                    st.markdown(f"{alerta} {minutos} min")
 
     if not hay_pendientes:
         st.success("✅ Todo entregado. No hay pendientes.")
