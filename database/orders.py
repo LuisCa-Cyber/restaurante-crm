@@ -157,17 +157,24 @@ def obtener_modificaciones(order_id: str) -> list:
 
 
 def obtener_items_de_ordenes(order_ids: list) -> list:
-    """Retorna todos los items (nombre y cantidad) de una lista de órdenes."""
+    """Retorna items (nombre, cantidad, precio, menu_item_id) de una lista de órdenes."""
     if not order_ids:
         return []
     supabase = get_supabase()
     return (
         supabase.table("order_items")
-        .select("menu_item_name, quantity")
+        .select("menu_item_name, quantity, unit_price, menu_item_id")
         .in_("order_id", order_ids)
         .execute()
         .data
     )
+
+
+def eliminar_item_orden(item_id: str, order_id: str):
+    """Elimina un item de la orden y recalcula el total."""
+    supabase = get_supabase()
+    supabase.table("order_items").delete().eq("id", item_id).execute()
+    _recalcular_total(order_id)
 
 
 def obtener_ventas(restaurant_id: str, desde: str, hasta: str) -> list:

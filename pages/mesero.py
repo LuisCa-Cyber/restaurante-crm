@@ -7,7 +7,8 @@ from database.tables_db import obtener_mesas, actualizar_estado_mesa
 from database.menu import obtener_platos_del_dia
 from database.orders import (
     crear_orden, obtener_orden_abierta_de_mesa,
-    obtener_items_orden, agregar_items, marcar_item_entregado, cancelar_orden
+    obtener_items_orden, agregar_items, marcar_item_entregado,
+    cancelar_orden, eliminar_item_orden,
 )
 
 # Categorías donde aplica la opción de sopa
@@ -133,13 +134,22 @@ def _vista_orden(restaurante: dict, mesero: dict):
 
     st.markdown(f"## Orden — {mesa['name']}")
 
-    # Items ya registrados
+    # Items ya registrados con opción de eliminar
     items_actuales = obtener_items_orden(order_id)
     if items_actuales:
         st.markdown("**Pedido actual:**")
         for item in items_actuales:
             nota = f" _(nota: {item['notes']})_" if item.get("notes") else ""
-            st.markdown(f"- {item['quantity']}x **{item['menu_item_name']}**{nota}")
+            col_item, col_del = st.columns([5, 1])
+            with col_item:
+                entregado = "✅ " if item.get("delivered") else ""
+                st.markdown(f"- {entregado}{item['quantity']}x **{item['menu_item_name']}**{nota}")
+            with col_del:
+                if not item.get("delivered"):
+                    if st.button("🗑️", key=f"del_item_{item['id']}",
+                                 help="Eliminar este item"):
+                        eliminar_item_orden(item["id"], order_id)
+                        st.rerun()
         st.divider()
 
     # Agregar nuevos items
@@ -191,17 +201,22 @@ def _vista_orden(restaurante: dict, mesero: dict):
                         else:
                             con_sopa_qty = 0
 
-                        # Si pide sopa y hay más de una, preguntar cuál
-                        if con_sopa_qty > 0 and len(sopas_disponibles) > 1:
-                            nombre_sopa = st.selectbox(
-                                "¿Qué sopa?",
-                                options=[s["name"] for s in sopas_disponibles],
-                                key=f"cual_sopa_{order_id}_{plato['id']}",
-                            )
-                        elif con_sopa_qty > 0 and len(sopas_disponibles) == 1:
-                            nombre_sopa = sopas_disponibles[0]["name"]
-                        else:
-                            nombre_sopa = "sopa"
+                        # Por cada porción con sopa, elegir qué sopa (si hay varias)
+                        sopas_por_porcion: list[str] = []
+                        if con_sopa_qty > 0:
+                            if len(sopas_disponibles) > 1:
+                                nombres_sopas = [s["name"] for s in sopas_disponibles]
+                                for i in range(con_sopa_qty):
+                                    sopa_i = st.selectbox(
+                                        f"Sopa — porción {i + 1}",
+                                        options=nombres_sopas,
+                                        key=f"sopa_{order_id}_{plato['id']}_{i}",
+                                    )
+                                    sopas_por_porcion.append(sopa_i)
+                            elif len(sopas_disponibles) == 1:
+                                sopas_por_porcion = [sopas_disponibles[0]["name"]] * con_sopa_qty
+                            else:
+                                sopas_por_porcion = ["sopa"] * con_sopa_qty
 
                         nota = st.text_input(
                             "Nota (opcional)",
@@ -210,14 +225,20 @@ def _vista_orden(restaurante: dict, mesero: dict):
                         )
                         nota_val = nota.strip() if nota else None
 
-                        if con_sopa_qty > 0:
-                            carrito.append({
-                                "menu_item_id": plato["id"],
-                                "menu_item_name": f"{plato['name']} (con {nombre_sopa})",
-                                "unit_price": precio_base + PRECIO_SOPA,
-                                "quantity": con_sopa_qty,
-                                "notes": nota_val,
-                            })
+                        # Agrupar porciones con sopa por tipo elegido
+                        if sopas_por_porcion:
+                            conteo_sopas: dict[str, int] = {}
+                            for nombre_sopa in sopas_por_porcion:
+                                conteo_sopas[nombre_sopa] = conteo_sopas.get(nombre_sopa, 0) + 1
+                            for nombre_sopa, qty_sopa in conteo_sopas.items():
+                                carrito.append({
+                                    "menu_item_id": plato["id"],
+                                    "menu_item_name": f"{plato['name']} (con {nombre_sopa})",
+                                    "unit_price": precio_base + PRECIO_SOPA,
+                                    "quantity": qty_sopa,
+                                    "notes": nota_val,
+                                })
+
                         sin_sopa_qty = cantidad - con_sopa_qty
                         if sin_sopa_qty > 0:
                             carrito.append({
