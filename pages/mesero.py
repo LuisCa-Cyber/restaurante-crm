@@ -67,6 +67,11 @@ def _seleccionar_mesero(restaurante: dict):
 # ── Vista de mesas ─────────────────────────────────────────────────────────────
 
 def _vista_mesas(restaurante: dict, mesero: dict):
+    # Si ya hay una mesa activa, mostrar directamente la vista de orden (sin scroll)
+    if st.session_state.get("vista_mesero") == "orden":
+        _vista_orden(restaurante, mesero)
+        return
+
     st.markdown("### Mesas del restaurante")
     st.caption("Verde = disponible · Rojo = ocupada")
 
@@ -116,10 +121,6 @@ def _vista_mesas(restaurante: dict, mesero: dict):
                         st.session_state["vista_mesero"] = "orden"
                         st.rerun()
 
-    if st.session_state.get("vista_mesero") == "orden":
-        st.divider()
-        _vista_orden(restaurante, mesero)
-
 
 # ── Tomar / agregar items a la orden ──────────────────────────────────────────
 
@@ -157,6 +158,9 @@ def _vista_orden(restaurante: dict, mesero: dict):
                 cat = "Otros"
             categorias.setdefault(cat, []).append(p)
 
+        # Sopas disponibles para la selección al pedir con sopa
+        sopas_disponibles = [p for p in platos if p.get("category") == "Sopas"]
+
         for categoria in [c for c in CATEGORIAS_MENU if c in categorias]:
             items = categorias[categoria]
             with st.expander(categoria):
@@ -187,6 +191,18 @@ def _vista_orden(restaurante: dict, mesero: dict):
                         else:
                             con_sopa_qty = 0
 
+                        # Si pide sopa y hay más de una, preguntar cuál
+                        if con_sopa_qty > 0 and len(sopas_disponibles) > 1:
+                            nombre_sopa = st.selectbox(
+                                "¿Qué sopa?",
+                                options=[s["name"] for s in sopas_disponibles],
+                                key=f"cual_sopa_{order_id}_{plato['id']}",
+                            )
+                        elif con_sopa_qty > 0 and len(sopas_disponibles) == 1:
+                            nombre_sopa = sopas_disponibles[0]["name"]
+                        else:
+                            nombre_sopa = "sopa"
+
                         nota = st.text_input(
                             "Nota (opcional)",
                             placeholder="Ej: sin ensalada, extra papa...",
@@ -197,7 +213,7 @@ def _vista_orden(restaurante: dict, mesero: dict):
                         if con_sopa_qty > 0:
                             carrito.append({
                                 "menu_item_id": plato["id"],
-                                "menu_item_name": f"{plato['name']} (con sopa)",
+                                "menu_item_name": f"{plato['name']} (con {nombre_sopa})",
                                 "unit_price": precio_base + PRECIO_SOPA,
                                 "quantity": con_sopa_qty,
                                 "notes": nota_val,

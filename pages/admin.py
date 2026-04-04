@@ -16,7 +16,8 @@ from database.waiters_db import obtener_meseros, crear_mesero, eliminar_mesero
 from database.orders import (
     obtener_ordenes_abiertas, obtener_items_orden,
     cerrar_orden, obtener_ventas, cancelar_orden,
-    registrar_modificacion, obtener_modificaciones
+    registrar_modificacion, obtener_modificaciones,
+    obtener_items_de_ordenes,
 )
 
 CATEGORIAS = ["Sopas", "Plato del día", "Parrilla", "Adiciones", "Postres", "Otros"]
@@ -499,7 +500,7 @@ def _tab_dashboard(restaurante: dict):
     df["fecha"] = df["closed_at"].dt.date
     df["total"] = df["total"].astype(float)
 
-    # KPIs
+    # KPIs base
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total ventas", f"💲{df['total'].sum():,.0f}")
@@ -507,6 +508,24 @@ def _tab_dashboard(restaurante: dict):
         st.metric("Cuentas cerradas", len(df))
     with col3:
         st.metric("Promedio por cuenta", f"💲{df['total'].mean():,.0f}")
+
+    # Plato más vendido en el período
+    order_ids = df["id"].tolist()
+    items_ventas = obtener_items_de_ordenes(order_ids)
+    if items_ventas:
+        df_items = pd.DataFrame(items_ventas)
+        ventas_plato = (
+            df_items.groupby("menu_item_name")["quantity"]
+            .sum()
+            .reset_index()
+            .sort_values("quantity", ascending=False)
+        )
+        top = ventas_plato.iloc[0]
+        st.metric(
+            "🏆 Plato más vendido",
+            top["menu_item_name"],
+            f"{int(top['quantity'])} unidades",
+        )
 
     st.divider()
 

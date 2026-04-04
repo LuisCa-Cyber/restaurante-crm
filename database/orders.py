@@ -156,6 +156,20 @@ def obtener_modificaciones(order_id: str) -> list:
     )
 
 
+def obtener_items_de_ordenes(order_ids: list) -> list:
+    """Retorna todos los items (nombre y cantidad) de una lista de órdenes."""
+    if not order_ids:
+        return []
+    supabase = get_supabase()
+    return (
+        supabase.table("order_items")
+        .select("menu_item_name, quantity")
+        .in_("order_id", order_ids)
+        .execute()
+        .data
+    )
+
+
 def obtener_ventas(restaurant_id: str, desde: str, hasta: str) -> list:
     """
     Retorna órdenes cerradas en un rango de fechas (hora Colombia UTC-5).
