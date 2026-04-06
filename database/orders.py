@@ -163,7 +163,7 @@ def obtener_items_de_ordenes(order_ids: list) -> list:
     supabase = get_supabase()
     return (
         supabase.table("order_items")
-        .select("menu_item_name, quantity, unit_price, menu_item_id")
+        .select("order_id, menu_item_name, quantity, unit_price, menu_item_id")
         .in_("order_id", order_ids)
         .execute()
         .data

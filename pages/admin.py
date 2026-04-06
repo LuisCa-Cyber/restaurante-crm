@@ -623,11 +623,33 @@ def _tab_dashboard(restaurante: dict):
 
     st.divider()
 
-    # ── Ventas por día y mesero ────────────────────────────────────────────────
-    ventas_dia = df.groupby("fecha")["total"].sum().reset_index()
-    ventas_dia.columns = ["Fecha", "Total"]
-    fig = px.bar(ventas_dia, x="Fecha", y="Total",
-                 title="Ventas por día", color_discrete_sequence=["#FF6B35"])
+    # ── Ventas por día ────────────────────────────────────────────────────────
+    metrica = st.radio("Gráfica de ventas por día:", ["💲 Dinero", "🍽️ Platos vendidos"],
+                       horizontal=True, key="metrica_ventas_dia")
+
+    if metrica == "💲 Dinero":
+        ventas_dia = df.groupby("fecha")["total"].sum().reset_index()
+        ventas_dia.columns = ["Fecha", "Valor"]
+        fig = px.bar(ventas_dia, x="Fecha", y="Valor",
+                     title="Ventas por día ($)", color_discrete_sequence=["#FF6B35"],
+                     labels={"Valor": "Total ($)"})
+        fig.update_traces(hovertemplate="<b>%{x}</b><br>💲 %{y:,.0f}<extra></extra>")
+    else:
+        if not df_items.empty:
+            platos_fecha = (
+                df_items.merge(df[["id", "fecha"]], left_on="order_id", right_on="id")
+                .groupby("fecha")["quantity"].sum()
+                .reset_index()
+            )
+            platos_fecha.columns = ["Fecha", "Valor"]
+        else:
+            platos_fecha = df.groupby("fecha").size().reset_index(name="Valor")
+            platos_fecha.columns = ["Fecha", "Valor"]
+        fig = px.bar(platos_fecha, x="Fecha", y="Valor",
+                     title="Platos vendidos por día", color_discrete_sequence=["#6C5CE7"],
+                     labels={"Valor": "Platos"})
+        fig.update_traces(hovertemplate="<b>%{x}</b><br>🍽️ %{y} platos<extra></extra>")
+
     fig.update_layout(showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
 
@@ -639,8 +661,14 @@ def _tab_dashboard(restaurante: dict):
 
     # ── Tabla detalle ──────────────────────────────────────────────────────────
     st.markdown("### Detalle de cuentas cerradas")
-    df_mostrar = df[["closed_at", "table_name", "waiter_name", "total", "minutos_en_mesa"]].copy()
-    df_mostrar.columns = ["Fecha/Hora", "Mesa", "Mesero", "Total", "Min. en mesa"]
+    if not df_items.empty:
+        platos_por_orden = df_items.groupby("order_id")["quantity"].sum()
+        df["platos"] = df["id"].map(platos_por_orden).fillna(0).astype(int)
+    else:
+        df["platos"] = 0
+
+    df_mostrar = df[["closed_at", "table_name", "waiter_name", "total", "platos", "minutos_en_mesa"]].copy()
+    df_mostrar.columns = ["Fecha/Hora", "Mesa", "Mesero", "Total", "Platos", "Min. en mesa"]
     df_mostrar["Total"] = df_mostrar["Total"].apply(lambda x: f"💲{x:,.0f}")
     df_mostrar["Min. en mesa"] = df_mostrar["Min. en mesa"].apply(lambda x: f"{x:.0f} min")
     st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
