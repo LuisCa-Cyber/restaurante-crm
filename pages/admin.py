@@ -55,29 +55,53 @@ def _pedir_password(restaurante: dict):
 
 
 def _panel_admin(restaurante: dict):
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📋 Órdenes activas",
-        "⏳ Pendientes",
-        "⭐ Platos del día",
-        "🍽️ Gestión de platos",
-        "⚙️ Configuración",
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "☀️ Programación del día",
+        "🏪 Caja y servicio",
+        "👥 Equipo y mesas",
+        "📦 Stock",
         "📊 Dashboard",
     ])
     with tab1:
-        _tab_ordenes(restaurante)
+        _tab_programacion_dia(restaurante)
     with tab2:
-        _tab_pendientes(restaurante)
+        _tab_caja_servicio(restaurante)
     with tab3:
-        _tab_plato_del_dia(restaurante)
-    with tab4:
-        _tab_gestion_platos(restaurante)
-    with tab5:
         _tab_configuracion(restaurante)
-    with tab6:
+    with tab4:
+        _tab_stock(restaurante)
+    with tab5:
         _tab_dashboard(restaurante)
 
 
-# ── Tab 1: Órdenes activas ────────────────────────────────────────────────────
+# ── Tab 1: Programación del día ───────────────────────────────────────────────
+
+def _tab_programacion_dia(restaurante: dict):
+    st.markdown("### ☀️ ¿Qué se vende hoy?")
+    st.caption("Activa los platos que el mesero podrá ofrecer durante el día.")
+    _tab_plato_del_dia(restaurante)
+    st.divider()
+    st.markdown("### 🍽️ Gestión de platos")
+    st.caption("Crea, edita o elimina platos del menú permanente.")
+    _tab_gestion_platos(restaurante)
+
+
+# ── Tab 2: Caja y servicio ────────────────────────────────────────────────────
+
+def _tab_caja_servicio(restaurante: dict):
+    if st.session_state.get("orden_cerrando_id"):
+        _pantalla_cierre(restaurante)
+        return
+
+    sub1, sub2 = st.tabs(["📋 Órdenes activas", "⏳ Pendientes de entrega"])
+    with sub1:
+        _ordenes_fragment(restaurante["id"])
+    with sub2:
+        st.caption("🟢 < 5 min · 🟡 5-10 min · 🔴 > 10 min · Se actualiza cada 5 segundos")
+        _pendientes_fragment(restaurante["id"])
+
+
+# ── (interno) Órdenes activas ─────────────────────────────────────────────────
 
 def _tab_ordenes(restaurante: dict):
     st.markdown("### Órdenes activas")
@@ -210,12 +234,6 @@ def _pantalla_cierre(restaurante: dict):
             st.rerun()
 
 
-# ── Tab 2: Pendientes ─────────────────────────────────────────────────────────
-
-def _tab_pendientes(restaurante: dict):
-    st.markdown("### ⏳ Items pendientes de entrega")
-    st.caption("🟢 < 5 min · 🟡 5-10 min · 🔴 > 10 min · Se actualiza cada 5 segundos")
-    _pendientes_fragment(restaurante["id"])
 
 
 @st.fragment(run_every=5)
@@ -417,7 +435,7 @@ def _lista_platos(restaurante: dict):
                         st.rerun()
 
 
-# ── Tab 4: Configuración ──────────────────────────────────────────────────────
+# ── Tab 3: Equipo y mesas ─────────────────────────────────────────────────────
 
 def _tab_configuracion(restaurante: dict):
     col1, col2 = st.columns(2)
@@ -471,6 +489,13 @@ def _tab_configuracion(restaurante: dict):
                 if st.button("🗑️", key=f"del_mesero_{mesero['id']}"):
                     eliminar_mesero(mesero["id"])
                     st.rerun()
+
+
+# ── Tab 4: Stock ──────────────────────────────────────────────────────────────
+
+def _tab_stock(_restaurante: dict):
+    st.markdown("### 📦 Gestión de Stock")
+    st.info("Módulo en construcción. Aquí podrás registrar ingredientes, ver niveles de inventario y recibir alertas de stock bajo.")
 
 
 # ── Tab 5: Dashboard ──────────────────────────────────────────────────────────
