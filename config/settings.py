@@ -31,7 +31,7 @@ def get_env(key: str) -> str:
 def configurar_pagina():
     """Configura el layout y metadatos globales de la app."""
     st.set_page_config(
-        page_title="RestauranteCRM",
+        page_title="Gestión Restaurante",
         page_icon="🍽️",
         layout="wide",
         initial_sidebar_state="collapsed",
