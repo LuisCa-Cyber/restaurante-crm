@@ -81,46 +81,48 @@ def _vista_mesas(restaurante: dict, mesero: dict):
         st.info("No hay mesas configuradas. El admin debe crearlas en Configuración.")
         return
 
-    cols = st.columns(4)
-    for i, mesa in enumerate(mesas):
-        with cols[i % 4]:
-            orden = obtener_orden_abierta_de_mesa(mesa["id"])
-            ocupada = mesa["status"] == "occupied"
+    for i in range(0, len(mesas), 2):
+        fila = mesas[i:i + 2]
+        cols = st.columns(2)
+        for j, mesa in enumerate(fila):
+            with cols[j]:
+                orden = obtener_orden_abierta_de_mesa(mesa["id"])
+                ocupada = mesa["status"] == "occupied"
 
-            with st.container(border=True):
-                st.markdown(f"### {mesa['name']}")
-                if ocupada and orden:
-                    st.markdown("🔴 Ocupada")
-                    st.caption(f"Mesero: {orden['waiter_name']}")
-                    items = obtener_items_orden(orden["id"])
-                    st.caption(f"{len(items)} item(s)")
+                with st.container(border=True):
+                    st.markdown(f"### {mesa['name']}")
+                    if ocupada and orden:
+                        st.markdown("🔴 Ocupada")
+                        st.caption(f"Mesero: {orden['waiter_name']}")
+                        items = obtener_items_orden(orden["id"])
+                        st.caption(f"{len(items)} item(s)")
 
-                    if st.button("Ver / Agregar", key=f"ver_{mesa['id']}",
-                                 use_container_width=True):
-                        st.session_state["mesa_activa"] = mesa
-                        st.session_state["orden_activa_id"] = orden["id"]
-                        st.session_state["vista_mesero"] = "orden"
-                        st.rerun()
-
-                    # Solo el mesero que atiende la mesa puede liberarla
-                    if orden["waiter_id"] == mesero["id"]:
-                        if st.button("🚫 Liberar mesa", key=f"liberar_{mesa['id']}",
+                        if st.button("Ver / Agregar", key=f"ver_{mesa['id']}",
                                      use_container_width=True):
-                            cancelar_orden(orden["id"], mesa["id"])
+                            st.session_state["mesa_activa"] = mesa
+                            st.session_state["orden_activa_id"] = orden["id"]
+                            st.session_state["vista_mesero"] = "orden"
                             st.rerun()
-                else:
-                    st.markdown("🟢 Disponible")
-                    if st.button("Atender", key=f"atender_{mesa['id']}",
-                                 use_container_width=True, type="primary"):
-                        nueva_orden = crear_orden(
-                            restaurante["id"], mesa["id"], mesa["name"],
-                            mesero["id"], mesero["name"]
-                        )
-                        actualizar_estado_mesa(mesa["id"], "occupied")
-                        st.session_state["mesa_activa"] = mesa
-                        st.session_state["orden_activa_id"] = nueva_orden["id"]
-                        st.session_state["vista_mesero"] = "orden"
-                        st.rerun()
+
+                        # Solo el mesero que atiende la mesa puede liberarla
+                        if orden["waiter_id"] == mesero["id"]:
+                            if st.button("🚫 Liberar mesa", key=f"liberar_{mesa['id']}",
+                                         use_container_width=True):
+                                cancelar_orden(orden["id"], mesa["id"])
+                                st.rerun()
+                    else:
+                        st.markdown("🟢 Disponible")
+                        if st.button("Atender", key=f"atender_{mesa['id']}",
+                                     use_container_width=True, type="primary"):
+                            nueva_orden = crear_orden(
+                                restaurante["id"], mesa["id"], mesa["name"],
+                                mesero["id"], mesero["name"]
+                            )
+                            actualizar_estado_mesa(mesa["id"], "occupied")
+                            st.session_state["mesa_activa"] = mesa
+                            st.session_state["orden_activa_id"] = nueva_orden["id"]
+                            st.session_state["vista_mesero"] = "orden"
+                            st.rerun()
 
 
 # ── Tomar / agregar items a la orden ──────────────────────────────────────────
