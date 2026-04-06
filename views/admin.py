@@ -6,7 +6,7 @@ import plotly.express as px
 from datetime import date, timedelta, datetime, timezone
 
 from utils.auth import verificar_password_admin
-from pages.stock_ui import mostrar_stock
+from views.stock_ui import mostrar_stock
 from database.menu import (
     obtener_todos_los_platos, crear_plato, actualizar_plato,
     eliminar_plato, toggle_disponible, toggle_plato_del_dia, actualizar_imagen

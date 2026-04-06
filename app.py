@@ -2,9 +2,9 @@
 
 import streamlit as st
 from config.settings import configurar_pagina
-from pages.home import mostrar_home
-from pages.mesero import mostrar_vista_mesero
-from pages.admin import mostrar_vista_admin
+from views.home import mostrar_home
+from views.mesero import mostrar_vista_mesero
+from views.admin import mostrar_vista_admin
 from database.supabase_client import get_supabase
 
 configurar_pagina()
