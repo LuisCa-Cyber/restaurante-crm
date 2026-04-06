@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   created_at       TIMESTAMPTZ DEFAULT now()
 );
 
+-- Columna de umbral crítico (si ya creaste la tabla antes, corre solo esta línea)
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS stock_critical DECIMAL(10,3) DEFAULT 0;
+
 -- Índices para queries frecuentes
 CREATE INDEX IF NOT EXISTS idx_ingredients_restaurant ON ingredients(restaurant_id);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_restaurant ON stock_movements(restaurant_id);

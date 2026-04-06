@@ -2,95 +2,106 @@
 
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 from datetime import datetime, timezone, timedelta
 
 from database.stock_db import (
-    CATEGORIAS_INSUMOS, UNIDADES,
+    CATEGORIAS_INSUMOS, UNIDADES, nivel_alerta,
     obtener_ingredientes, crear_ingrediente, actualizar_ingrediente,
     eliminar_ingrediente, registrar_movimiento, obtener_movimientos,
-    valor_total_inventario,
+    valor_total_inventario, resumen_costos,
 )
 
 COL_TZ = timezone(timedelta(hours=-5))
 
-# Acciones en lenguaje cotidiano
 ACCIONES = {
     "llegó": {
-        "tipo": "entrada",
+        "tipo":   "entrada",
         "titulo": "📥 Llegó mercancía",
-        "desc": "Registra una compra o entrega de proveedor",
-        "color": "primary",
+        "desc":   "Registra una compra o entrega de proveedor",
+    },
+    "salió": {
+        "tipo":   "salida",
+        "titulo": "📤 Salió mercancía",
+        "desc":   "Registra lo que usaste hoy en cocina",
     },
     "dañó": {
-        "tipo": "merma",
+        "tipo":   "merma",
         "titulo": "🗑️ Se dañó o venció",
-        "desc": "Producto que hay que tirar (caducado, caída, daño)",
-        "color": "secondary",
+        "desc":   "Producto que hay que tirar",
     },
     "conté": {
-        "tipo": "ajuste",
+        "tipo":   "ajuste",
         "titulo": "🔢 Hice un conteo",
-        "desc": "Ajustar el stock al valor real que encontraste en bodega",
-        "color": "secondary",
+        "desc":   "Ajusta el stock al número real que contaste en bodega",
     },
 }
 
+ICONO = {"verde": "🟢", "amarillo": "🟡", "rojo": "🔴"}
+
 
 def mostrar_stock(restaurante: dict):
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "📦 Inventario",
+        "📊 Análisis de costos",
         "🥩 Mis insumos",
         "📋 Historial",
     ])
     with tab1:
         _tab_inventario(restaurante)
     with tab2:
-        _tab_insumos(restaurante)
+        _tab_analisis(restaurante)
     with tab3:
+        _tab_insumos(restaurante)
+    with tab4:
         _tab_historial(restaurante)
 
 
-# ── Tab 1: Inventario (vista principal) ───────────────────────────────────────
+# ── Tab 1: Inventario ─────────────────────────────────────────────────────────
 
 def _tab_inventario(restaurante: dict):
     ingredientes = obtener_ingredientes(restaurante["id"])
 
     if not ingredientes:
         st.info("Aún no tienes insumos registrados.")
-        st.markdown("Ve a la pestaña **🥩 Mis insumos** y crea los productos que manejas en tu cocina.")
+        st.markdown("Ve a **🥩 Mis insumos** y crea los productos que manejas en cocina.")
         return
 
-    # ── Acciones rápidas ──────────────────────────────────────────────────────
     accion_activa = st.session_state.get("stock_accion")
-
-    if not accion_activa:
-        st.markdown("### ¿Qué pasó hoy con el inventario?")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("📥 Llegó mercancía", use_container_width=True, type="primary",
-                         help="Registra una compra o entrega de proveedor"):
-                st.session_state["stock_accion"] = "llegó"
-                st.rerun()
-        with col2:
-            if st.button("🗑️ Se dañó o venció", use_container_width=True,
-                         help="Producto que hay que tirar"):
-                st.session_state["stock_accion"] = "dañó"
-                st.rerun()
-        with col3:
-            if st.button("🔢 Hice un conteo", use_container_width=True,
-                         help="Corrige el stock al número real que contaste"):
-                st.session_state["stock_accion"] = "conté"
-                st.rerun()
-    else:
+    if accion_activa:
         _formulario_accion(restaurante, ingredientes, accion_activa)
         return
+
+    # ── Botones de acción ─────────────────────────────────────────────────────
+    st.markdown("### ¿Qué pasó hoy con el inventario?")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("📥 Llegó mercancía", use_container_width=True, type="primary",
+                     help="Registra una compra o entrega de proveedor"):
+            st.session_state["stock_accion"] = "llegó"
+            st.rerun()
+    with col2:
+        if st.button("📤 Salió mercancía", use_container_width=True, type="primary",
+                     help="Registra lo que usaste hoy en cocina"):
+            st.session_state["stock_accion"] = "salió"
+            st.rerun()
+    with col3:
+        if st.button("🗑️ Se dañó o venció", use_container_width=True,
+                     help="Producto que hay que tirar"):
+            st.session_state["stock_accion"] = "dañó"
+            st.rerun()
+    with col4:
+        if st.button("🔢 Hice un conteo", use_container_width=True,
+                     help="Ajusta el stock al número real que contaste"):
+            st.session_state["stock_accion"] = "conté"
+            st.rerun()
 
     st.divider()
 
     # ── KPIs ──────────────────────────────────────────────────────────────────
-    sin_stock  = [i for i in ingredientes if float(i["stock_current"]) == 0]
-    bajo_min   = [i for i in ingredientes if 0 < float(i["stock_current"]) <= float(i["stock_min"])]
-    valor      = valor_total_inventario(restaurante["id"])
+    rojos    = [i for i in ingredientes if nivel_alerta(i) == "rojo"]
+    amarillos = [i for i in ingredientes if nivel_alerta(i) == "amarillo"]
+    valor    = valor_total_inventario(restaurante["id"])
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -98,79 +109,107 @@ def _tab_inventario(restaurante: dict):
     with col2:
         st.metric("💰 Valor en bodega", f"💲{valor:,.0f}")
     with col3:
-        st.metric("🟡 Bajo mínimo", len(bajo_min))
+        st.metric("🟡 Reposición pronto", len(amarillos))
     with col4:
-        st.metric("🔴 Sin stock", len(sin_stock))
+        st.metric("🔴 Reponer urgente", len(rojos))
 
     # ── Alertas ───────────────────────────────────────────────────────────────
-    if sin_stock or bajo_min:
+    if rojos or amarillos:
         st.divider()
-        st.markdown("### ⚠️ Necesitan reposición")
+        st.markdown("### ⚠️ Necesitan atención")
 
-        for i in sin_stock:
-            col_a, col_b = st.columns([5, 1])
-            with col_a:
-                st.error(f"🔴 **{i['name']}** — Sin stock  |  Mínimo: {_fmt(i['stock_min'])} {i['unit']}")
-            with col_b:
-                if st.button("Comprar", key=f"alerta_comprar_{i['id']}", use_container_width=True):
-                    st.session_state["stock_accion"] = "llegó"
-                    st.session_state["stock_ing_presel"] = i["id"]
-                    st.rerun()
+        if rojos:
+            st.markdown("**🔴 Urgente — stock crítico:**")
+            for i in rojos:
+                col_a, col_b, col_c = st.columns([4, 1, 1])
+                with col_a:
+                    st.error(
+                        f"🔴 **{i['name']}** — "
+                        f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
+                        f"Crítico: {_fmt(i['stock_critical'])} {i['unit']}"
+                    )
+                with col_b:
+                    if st.button("📥 Comprar", key=f"r_comprar_{i['id']}", use_container_width=True):
+                        st.session_state["stock_accion"]     = "llegó"
+                        st.session_state["stock_ing_presel"] = i["id"]
+                        st.rerun()
+                with col_c:
+                    if st.button("📤 Usar", key=f"r_usar_{i['id']}", use_container_width=True):
+                        st.session_state["stock_accion"]     = "salió"
+                        st.session_state["stock_ing_presel"] = i["id"]
+                        st.rerun()
 
-        for i in bajo_min:
-            pct = float(i["stock_current"]) / float(i["stock_min"]) * 100 if float(i["stock_min"]) > 0 else 0
-            col_a, col_b = st.columns([5, 1])
-            with col_a:
-                st.warning(
-                    f"🟡 **{i['name']}** — {_fmt(i['stock_current'])} {i['unit']} disponibles  "
-                    f"|  Mínimo: {_fmt(i['stock_min'])} {i['unit']}  |  {pct:.0f}% del mínimo"
-                )
-                st.progress(min(pct / 100, 1.0))
-            with col_b:
-                if st.button("Comprar", key=f"alerta_bajo_{i['id']}", use_container_width=True):
-                    st.session_state["stock_accion"] = "llegó"
-                    st.session_state["stock_ing_presel"] = i["id"]
-                    st.rerun()
+        if amarillos:
+            st.markdown("**🟡 Pronto se acabará:**")
+            for i in amarillos:
+                minimo = float(i["stock_min"])
+                pct    = float(i["stock_current"]) / minimo * 100 if minimo > 0 else 0
+                col_a, col_b, col_c = st.columns([4, 1, 1])
+                with col_a:
+                    st.warning(
+                        f"🟡 **{i['name']}** — "
+                        f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
+                        f"Mínimo: {_fmt(i['stock_min'])} {i['unit']}  |  {pct:.0f}% del mínimo"
+                    )
+                    st.progress(min(pct / 100, 1.0))
+                with col_b:
+                    if st.button("📥 Comprar", key=f"a_comprar_{i['id']}", use_container_width=True):
+                        st.session_state["stock_accion"]     = "llegó"
+                        st.session_state["stock_ing_presel"] = i["id"]
+                        st.rerun()
+                with col_c:
+                    if st.button("📤 Usar", key=f"a_usar_{i['id']}", use_container_width=True):
+                        st.session_state["stock_accion"]     = "salió"
+                        st.session_state["stock_ing_presel"] = i["id"]
+                        st.rerun()
     else:
         st.success("✅ Todo el inventario está sobre el mínimo.")
 
-    # ── Tabla de estado ───────────────────────────────────────────────────────
+    # ── Estado general ────────────────────────────────────────────────────────
     st.divider()
     st.markdown("### Estado actual")
 
-    cats = ["Todas"] + sorted(set(i["category"] for i in ingredientes))
+    cats    = ["Todas"] + sorted(set(i["category"] for i in ingredientes))
     cat_sel = st.selectbox("Categoría", cats, key="inv_cat", label_visibility="collapsed")
-    lista = ingredientes if cat_sel == "Todas" else [i for i in ingredientes if i["category"] == cat_sel]
+    lista   = ingredientes if cat_sel == "Todas" else [i for i in ingredientes if i["category"] == cat_sel]
+
+    # Cabecera
+    hdr = st.columns([3, 2, 2, 2, 1, 1])
+    for col, txt in zip(hdr, ["Insumo", "Stock actual", "Costo / unidad", "Valor en bodega", "", ""]):
+        col.caption(txt)
 
     for item in lista:
-        stock  = float(item["stock_current"])
-        minimo = float(item["stock_min"])
-        icono  = "🔴" if stock == 0 else ("🟡" if stock <= minimo else "🟢")
+        stock     = float(item["stock_current"])
+        alerta    = nivel_alerta(item)
+        icono     = ICONO[alerta]
         valor_item = stock * float(item["cost_per_unit"])
 
-        col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
+        col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 2, 2, 1, 1])
         with col1:
             st.markdown(f"{icono} **{item['name']}**")
             st.caption(item["category"])
         with col2:
             st.markdown(f"**{_fmt(item['stock_current'])} {item['unit']}**")
-            st.caption(f"Mín: {_fmt(item['stock_min'])} {item['unit']}")
+            st.caption(f"Mín: {_fmt(item['stock_min'])}  |  Crítico: {_fmt(item['stock_critical'])}")
         with col3:
-            st.markdown(f"💲{float(item['cost_per_unit']):,.0f} / {item['unit']}")
+            st.markdown(f"💲{float(item['cost_per_unit']):,.0f}/{item['unit']}")
         with col4:
             st.markdown(f"💰 💲{valor_item:,.0f}")
-            if minimo > 0:
-                st.progress(min(stock / minimo / 2, 1.0))
         with col5:
-            if st.button("📥", key=f"inv_entrada_{item['id']}",
-                         help="Registrar entrada para este insumo"):
-                st.session_state["stock_accion"] = "llegó"
+            if st.button("📥", key=f"inv_in_{item['id']}", help="Llegó mercancía"):
+                st.session_state["stock_accion"]     = "llegó"
+                st.session_state["stock_ing_presel"] = item["id"]
+                st.rerun()
+        with col6:
+            if st.button("📤", key=f"inv_out_{item['id']}", help="Salió mercancía"):
+                st.session_state["stock_accion"]     = "salió"
                 st.session_state["stock_ing_presel"] = item["id"]
                 st.rerun()
 
 
+# ── Formulario de acción ──────────────────────────────────────────────────────
+
 def _formulario_accion(restaurante: dict, ingredientes: list, accion: str):
-    """Formulario inline para las 3 acciones principales."""
     cfg = ACCIONES[accion]
 
     col_titulo, col_cancelar = st.columns([4, 1])
@@ -186,9 +225,8 @@ def _formulario_accion(restaurante: dict, ingredientes: list, accion: str):
 
     st.divider()
 
-    # Selector de insumo con preselección
-    presel = st.session_state.pop("stock_ing_presel", None)
-    ids = [i["id"] for i in ingredientes]
+    presel     = st.session_state.pop("stock_ing_presel", None)
+    ids        = [i["id"] for i in ingredientes]
     default_idx = ids.index(presel) if presel and presel in ids else 0
 
     ing_id = st.selectbox(
@@ -200,14 +238,16 @@ def _formulario_accion(restaurante: dict, ingredientes: list, accion: str):
         ),
         index=default_idx,
     )
-    ing = next(i for i in ingredientes if i["id"] == ing_id)
-
-    # Indicador del estado actual
+    ing         = next(i for i in ingredientes if i["id"] == ing_id)
     stock_actual = float(ing["stock_current"])
-    minimo = float(ing["stock_min"])
-    icono = "🔴" if stock_actual == 0 else ("🟡" if stock_actual <= minimo else "🟢")
-    st.info(f"{icono} **{ing['name']}** tiene actualmente **{_fmt(ing['stock_current'])} {ing['unit']}** en bodega.")
+    costo_actual = float(ing["cost_per_unit"])
+    alerta       = nivel_alerta(ing)
 
+    st.info(
+        f"{ICONO[alerta]} **{ing['name']}** — "
+        f"hay **{_fmt(stock_actual)} {ing['unit']}** en bodega  |  "
+        f"Costo actual: 💲{costo_actual:,.0f}/{ing['unit']}"
+    )
     st.divider()
 
     with st.form("form_accion_stock"):
@@ -216,59 +256,63 @@ def _formulario_accion(restaurante: dict, ingredientes: list, accion: str):
             col1, col2 = st.columns(2)
             with col1:
                 cantidad = st.number_input(
-                    f"Cantidad ({ing['unit']})",
-                    min_value=0.01, step=0.5,
-                    help="Escribe exactamente cuánto recibiste",
+                    f"Cantidad ({ing['unit']})", min_value=0.01, step=0.5,
                 )
             with col2:
                 costo = st.number_input(
                     "Precio que pagaste por unidad (💲)",
-                    min_value=0.0, step=100.0,
-                    value=float(ing["cost_per_unit"]),
+                    min_value=0.0, step=100.0, value=costo_actual,
                     help="Si el precio cambió, actualízalo aquí",
                 )
-            motivo = st.text_input(
-                "¿De dónde viene? (opcional)",
-                placeholder="Ej: Frigorífico Andino, Mercado Central...",
+            motivo  = st.text_input("¿De dónde viene? (opcional)",
+                                    placeholder="Ej: Frigorífico Andino, plaza de mercado...")
+            enviado = st.form_submit_button("✅ Registrar entrada", type="primary",
+                                            use_container_width=True)
+
+        elif accion == "salió":
+            st.markdown("**¿Cuánto se usó hoy?**")
+            cantidad = st.number_input(
+                f"Cantidad usada ({ing['unit']})", min_value=0.01, step=0.5,
+                help=f"Tienes {_fmt(stock_actual)} {ing['unit']} en bodega",
             )
-            enviado = st.form_submit_button(
-                f"✅ Registrar — llegaron {'{cantidad}'} {ing['unit']}".replace("{cantidad}", "..."),
-                type="primary", use_container_width=True,
-            )
+            # Preview del costo proporcional
+            if cantidad > 0:
+                costo_prop = cantidad * costo_actual
+                st.caption(f"💡 Costo equivalente: **💲{costo_prop:,.0f}** "
+                           f"({_fmt(cantidad)} × 💲{costo_actual:,.0f})")
+            motivo  = st.text_input("¿Para qué se usó? (opcional)",
+                                    placeholder="Ej: Servicio del día, preparación almuerzo...")
+            enviado = st.form_submit_button("✅ Registrar salida", type="primary",
+                                            use_container_width=True)
+            costo   = None
 
         elif accion == "dañó":
             st.markdown("**¿Cuánto hay que tirar?**")
             cantidad = st.number_input(
-                f"Cantidad a descartar ({ing['unit']})",
-                min_value=0.01, step=0.5,
-                help=f"Tienes {_fmt(ing['stock_current'])} {ing['unit']} en bodega",
+                f"Cantidad a descartar ({ing['unit']})", min_value=0.01, step=0.5,
             )
-            motivo = st.text_input(
-                "¿Por qué se dañó? *",
-                placeholder="Ej: Se venció, se cayó, olía mal, plagas...",
-            )
-            enviado = st.form_submit_button(
-                "🗑️ Registrar descarte", type="primary", use_container_width=True,
-            )
-            costo = None
+            if cantidad > 0:
+                costo_prop = cantidad * costo_actual
+                st.caption(f"💡 Pérdida equivalente: **💲{costo_prop:,.0f}**")
+            motivo  = st.text_input("¿Por qué se dañó? *",
+                                    placeholder="Ej: Se venció, se cayó, olía mal...")
+            enviado = st.form_submit_button("🗑️ Registrar descarte", type="primary",
+                                            use_container_width=True)
+            costo   = None
 
         else:  # conté
             st.markdown("**¿Cuánto contaste en bodega?**")
-            st.caption(f"El sistema tiene registrado {_fmt(ing['stock_current'])} {ing['unit']}. "
+            st.caption(f"El sistema tiene {_fmt(stock_actual)} {ing['unit']}. "
                        "Si el número real es diferente, escríbelo aquí.")
             cantidad = st.number_input(
                 f"Cantidad real contada ({ing['unit']})",
-                min_value=0.0, step=0.5,
-                value=float(ing["stock_current"]),
+                min_value=0.0, step=0.5, value=stock_actual,
             )
-            motivo = st.text_input(
-                "¿Por qué hay diferencia? (opcional)",
-                placeholder="Ej: Conteo físico de cierre del día, corrección de error...",
-            )
-            enviado = st.form_submit_button(
-                "🔢 Ajustar inventario", type="primary", use_container_width=True,
-            )
-            costo = None
+            motivo  = st.text_input("¿Por qué hay diferencia? (opcional)",
+                                    placeholder="Ej: Conteo físico de cierre del día...")
+            enviado = st.form_submit_button("🔢 Ajustar inventario", type="primary",
+                                            use_container_width=True)
+            costo   = None
 
     if enviado:
         if accion == "dañó" and not motivo.strip():
@@ -281,41 +325,161 @@ def _formulario_accion(restaurante: dict, ingredientes: list, accion: str):
             costo if accion == "llegó" else None,
         )
 
-        # Calcular nuevo stock para el mensaje
-        ings_nuevo = obtener_ingredientes(restaurante["id"])
-        ing_nuevo = next(i for i in ings_nuevo if i["id"] == ing_id)
-        nuevo_stock = float(ing_nuevo["stock_current"])
+        ings_nuevo   = obtener_ingredientes(restaurante["id"])
+        ing_nuevo    = next(i for i in ings_nuevo if i["id"] == ing_id)
+        nuevo_stock  = float(ing_nuevo["stock_current"])
 
         if accion == "llegó":
-            st.success(
-                f"✅ Registrado. **{ing['name']}** pasó de {_fmt(stock_actual)} a "
-                f"**{_fmt(nuevo_stock)} {ing['unit']}** en bodega."
-            )
+            st.success(f"✅ **{ing['name']}** pasó de {_fmt(stock_actual)} a "
+                       f"**{_fmt(nuevo_stock)} {ing['unit']}** en bodega.")
+        elif accion == "salió":
+            costo_prop = cantidad * costo_actual
+            st.success(f"✅ Salida registrada. **{ing['name']}** quedó en "
+                       f"**{_fmt(nuevo_stock)} {ing['unit']}**  |  "
+                       f"Costo equivalente: 💲{costo_prop:,.0f}")
         elif accion == "dañó":
-            st.warning(
-                f"🗑️ Registrado. **{ing['name']}** pasó de {_fmt(stock_actual)} a "
-                f"**{_fmt(nuevo_stock)} {ing['unit']}** en bodega."
-            )
+            costo_prop = cantidad * costo_actual
+            st.warning(f"🗑️ Descarte registrado. **{ing['name']}** quedó en "
+                       f"**{_fmt(nuevo_stock)} {ing['unit']}**  |  "
+                       f"Pérdida: 💲{costo_prop:,.0f}")
         else:
-            delta = nuevo_stock - stock_actual
-            signo = "+" if delta >= 0 else ""
-            st.success(
-                f"🔢 Ajuste registrado. **{ing['name']}** queda en "
-                f"**{_fmt(nuevo_stock)} {ing['unit']}** ({signo}{_fmt(delta)})."
-            )
+            delta  = nuevo_stock - stock_actual
+            signo  = "+" if delta >= 0 else ""
+            st.success(f"🔢 **{ing['name']}** ajustado a "
+                       f"**{_fmt(nuevo_stock)} {ing['unit']}** ({signo}{_fmt(delta)}).")
 
         st.session_state.pop("stock_accion", None)
         st.session_state.pop("stock_ing_presel", None)
         st.rerun()
 
 
-# ── Tab 2: Mis insumos ─────────────────────────────────────────────────────────
+# ── Tab 2: Análisis de costos ─────────────────────────────────────────────────
+
+def _tab_analisis(restaurante: dict):
+    ingredientes = obtener_ingredientes(restaurante["id"])
+    if not ingredientes:
+        st.info("Sin datos aún.")
+        return
+
+    resumen = resumen_costos(restaurante["id"])
+    valor   = valor_total_inventario(restaurante["id"])
+
+    st.markdown("### 📊 Análisis de costos del inventario")
+
+    # KPIs
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("💰 Valor actual en bodega", f"💲{valor:,.0f}")
+    with col2:
+        st.metric("📥 Total invertido (compras)", f"💲{resumen['invertido']:,.0f}")
+    with col3:
+        st.metric("📤 Costo de lo consumido", f"💲{resumen['costo_consumo']:,.0f}")
+    with col4:
+        st.metric("🗑️ Pérdidas por merma", f"💲{resumen['costo_merma']:,.0f}",
+                  delta=f"-💲{resumen['costo_merma']:,.0f}" if resumen['costo_merma'] > 0 else None,
+                  delta_color="inverse")
+
+    st.divider()
+
+    # Gráfica: composición del gasto
+    if resumen["invertido"] > 0:
+        df_torta = pd.DataFrame({
+            "Categoría": ["En bodega", "Consumido", "Mermas"],
+            "Valor":     [valor, resumen["costo_consumo"], resumen["costo_merma"]],
+        })
+        df_torta = df_torta[df_torta["Valor"] > 0]
+        fig = px.pie(df_torta, names="Categoría", values="Valor",
+                     title="¿A dónde fue lo que compraste?",
+                     color_discrete_sequence=["#2ECC71", "#3498DB", "#E74C3C"])
+        fig.update_traces(hovertemplate="<b>%{label}</b><br>💲 %{value:,.0f}<extra></extra>")
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # Tabla de costo proporcional por insumo
+    st.markdown("#### Costo proporcional por insumo (regla de tres)")
+    st.caption("Para cada insumo: cuánto costó lo que ya salió y lo que se dañó, "
+               "calculado con el precio de compra vigente.")
+
+    movs = obtener_movimientos(restaurante["id"], limit=2000)
+
+    filas = []
+    for ing in ingredientes:
+        movs_ing = [m for m in movs if m["ingredient_id"] == ing["id"]]
+
+        comprado   = sum(float(m["quantity"]) for m in movs_ing if m["type"] == "entrada")
+        costo_comp = sum(
+            float(m["quantity"]) * float(m["cost_per_unit"])
+            for m in movs_ing if m["type"] == "entrada" and m.get("cost_per_unit")
+        )
+        consumido  = sum(abs(float(m["quantity"])) for m in movs_ing if m["type"] == "salida")
+        costo_cons = sum(
+            abs(float(m["quantity"])) * float(m["cost_per_unit"])
+            for m in movs_ing if m["type"] == "salida" and m.get("cost_per_unit")
+        )
+        mermado    = sum(abs(float(m["quantity"])) for m in movs_ing if m["type"] == "merma")
+        costo_merm = sum(
+            abs(float(m["quantity"])) * float(m["cost_per_unit"])
+            for m in movs_ing if m["type"] == "merma" and m.get("cost_per_unit")
+        )
+
+        if comprado > 0 or consumido > 0:
+            filas.append({
+                "Insumo":        ing["name"],
+                "Unidad":        ing["unit"],
+                "Comprado":      _fmt(comprado),
+                "Invertido":     f"💲{costo_comp:,.0f}",
+                "Consumido":     _fmt(consumido),
+                "Costo consumo": f"💲{costo_cons:,.0f}",
+                "Merma":         _fmt(mermado),
+                "Pérdida merma": f"💲{costo_merm:,.0f}",
+                "En bodega":     f"{_fmt(ing['stock_current'])} {ing['unit']}",
+            })
+
+    if filas:
+        st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
+    else:
+        st.info("Registra compras y salidas para ver el análisis.")
+
+    st.divider()
+
+    # Gráfica de barras: compras por insumo
+    st.markdown("#### Inversión por insumo")
+    if filas:
+        df_bar = pd.DataFrame([
+            {"Insumo": f["Insumo"],
+             "Invertido": resumen_costos_ing(movs, ing["id"])["invertido"]}
+            for f, ing in zip(filas, [i for i in ingredientes
+                                       if any(m["ingredient_id"] == i["id"] for m in movs)])
+        ])
+        df_bar = df_bar[df_bar["Invertido"] > 0].sort_values("Invertido", ascending=False)
+        if not df_bar.empty:
+            fig2 = px.bar(df_bar, x="Insumo", y="Invertido",
+                          title="Total invertido por insumo (💲)",
+                          color_discrete_sequence=["#3498DB"],
+                          labels={"Invertido": "Pesos invertidos"})
+            fig2.update_traces(hovertemplate="<b>%{x}</b><br>💲 %{y:,.0f}<extra></extra>")
+            fig2.update_layout(xaxis_tickangle=-30, showlegend=False)
+            st.plotly_chart(fig2, use_container_width=True)
+
+
+def resumen_costos_ing(movs: list, ingredient_id: str) -> dict:
+    movs_ing = [m for m in movs if m["ingredient_id"] == ingredient_id]
+    return {
+        "invertido": sum(
+            float(m["quantity"]) * float(m["cost_per_unit"])
+            for m in movs_ing if m["type"] == "entrada" and m.get("cost_per_unit")
+        ),
+    }
+
+
+# ── Tab 3: Mis insumos ─────────────────────────────────────────────────────────
 
 def _tab_insumos(restaurante: dict):
     col_t, col_n = st.columns([4, 1])
     with col_t:
         st.markdown("### Mis insumos")
-        st.caption("Aquí defines qué productos maneja tu cocina, su unidad y el mínimo de alerta.")
+        st.caption("Define qué productos maneja tu cocina, su unidad y los niveles de alerta.")
     with col_n:
         st.markdown("")
         if st.button("➕ Agregar", use_container_width=True, type="primary"):
@@ -332,10 +496,10 @@ def _tab_insumos(restaurante: dict):
 
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        cats = ["Todas"] + sorted(set(i["category"] for i in ingredientes))
+        cats  = ["Todas"] + sorted(set(i["category"] for i in ingredientes))
         cat_f = st.selectbox("Categoría", cats, key="ins_cat")
     with col_f2:
-        busq = st.text_input("Buscar", placeholder="Nombre del insumo...", key="ins_busq")
+        busq  = st.text_input("Buscar", placeholder="Nombre del insumo...", key="ins_busq")
 
     lista = ingredientes
     if cat_f != "Todas":
@@ -347,29 +511,34 @@ def _tab_insumos(restaurante: dict):
     st.divider()
 
     for item in lista:
-        stock  = float(item["stock_current"])
-        minimo = float(item["stock_min"])
-        icono  = "🔴" if stock == 0 else ("🟡" if stock <= minimo else "🟢")
+        alerta = nivel_alerta(item)
+        icono  = ICONO[alerta]
 
         with st.expander(
             f"{icono} **{item['name']}** — "
             f"{_fmt(item['stock_current'])} {item['unit']} en bodega  |  "
-            f"Mín: {_fmt(item['stock_min'])} {item['unit']}  |  "
+            f"Mín 🟡: {_fmt(item['stock_min'])}  |  "
+            f"Crítico 🔴: {_fmt(item['stock_critical'])}  |  "
             f"💲{float(item['cost_per_unit']):,.0f}/{item['unit']}"
         ):
             with st.form(f"edit_{item['id']}"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    nombre   = st.text_input("Nombre", value=item["name"])
-                    u_idx    = UNIDADES.index(item["unit"]) if item["unit"] in UNIDADES else 0
-                    unidad   = st.selectbox("Unidad", UNIDADES, index=u_idx)
-                    c_idx    = CATEGORIAS_INSUMOS.index(item["category"]) if item["category"] in CATEGORIAS_INSUMOS else len(CATEGORIAS_INSUMOS) - 1
+                    nombre    = st.text_input("Nombre", value=item["name"])
+                    u_idx     = UNIDADES.index(item["unit"]) if item["unit"] in UNIDADES else 0
+                    unidad    = st.selectbox("Unidad", UNIDADES, index=u_idx)
+                    c_idx     = CATEGORIAS_INSUMOS.index(item["category"]) if item["category"] in CATEGORIAS_INSUMOS else len(CATEGORIAS_INSUMOS) - 1
                     categoria = st.selectbox("Categoría", CATEGORIAS_INSUMOS, index=c_idx)
                 with col2:
                     stock_min = st.number_input(
-                        "Mínimo de alerta",
+                        "🟡 Mínimo (aviso amarillo)",
                         value=float(item["stock_min"]), min_value=0.0, step=0.5,
-                        help="Cuando el stock baje de este número te aparecerá una alerta",
+                        help="Cuando baje de aquí se pone amarillo",
+                    )
+                    stock_crit = st.number_input(
+                        "🔴 Crítico (aviso rojo)",
+                        value=float(item.get("stock_critical") or 0), min_value=0.0, step=0.5,
+                        help="Cuando baje de aquí se pone rojo — hay que reponer urgente",
                     )
                     costo = st.number_input(
                         "Costo por unidad (💲)",
@@ -386,7 +555,8 @@ def _tab_insumos(restaurante: dict):
             if guardar:
                 actualizar_ingrediente(item["id"], {
                     "name": nombre, "unit": unidad, "category": categoria,
-                    "stock_min": stock_min, "cost_per_unit": costo,
+                    "stock_min": stock_min, "stock_critical": stock_crit,
+                    "cost_per_unit": costo,
                 })
                 st.success("Guardado.")
                 st.rerun()
@@ -399,24 +569,30 @@ def _tab_insumos(restaurante: dict):
 def _form_nuevo_insumo(restaurante: dict):
     with st.form("form_nuevo"):
         st.markdown("#### Nuevo insumo")
-        st.caption("Define el producto. El stock arranca en 0 — luego usas **Llegó mercancía** para cargarlo.")
+        st.caption("Define el producto. El stock arranca en 0 — usa **Llegó mercancía** para cargarlo.")
         col1, col2 = st.columns(2)
         with col1:
-            nombre    = st.text_input("Nombre *", placeholder="Ej: Pechuga de pollo")
+            nombre    = st.text_input("Nombre *", placeholder="Ej: Arroz")
             categoria = st.selectbox("Categoría *", CATEGORIAS_INSUMOS)
-        with col2:
             unidad    = st.selectbox(
                 "¿En qué se mide? *", UNIDADES,
-                help="kg = kilos, lt = litros, und = unidades (huevos, limones...)",
+                help="kg=kilos, lt=litros, und=unidades, libra=libras",
             )
+        with col2:
             stock_min = st.number_input(
-                "¿Cuándo quieres que te avise? (mínimo)",
-                min_value=0.0, step=0.5, value=1.0,
-                help="Si tienes menos de este número, aparece una alerta en rojo/amarillo",
+                "🟡 Mínimo (aviso amarillo)",
+                min_value=0.0, step=0.5, value=5.0,
+                help="Ej: si pones 7 libras, cuando queden 7 o menos se pone amarillo",
+            )
+            stock_crit = st.number_input(
+                "🔴 Crítico (aviso rojo)",
+                min_value=0.0, step=0.5, value=2.0,
+                help="Ej: si pones 3 libras, cuando queden 3 o menos se pone rojo",
             )
             costo = st.number_input(
                 "¿Cuánto te cuesta por unidad? (💲)",
                 min_value=0.0, step=100.0,
+                help="Usado para calcular el valor del inventario y el costo de lo que sale",
             )
 
         col_g, col_c = st.columns(2)
@@ -430,9 +606,12 @@ def _form_nuevo_insumo(restaurante: dict):
             st.error("El nombre es obligatorio.")
         else:
             crear_ingrediente(restaurante["id"], nombre.strip(), unidad,
-                              stock_min, costo, categoria)
+                              stock_min, stock_crit, costo, categoria)
             st.session_state["stock_form_nuevo"] = False
-            st.success(f"✅ '{nombre}' creado. Ahora ve a **📦 Inventario → Llegó mercancía** para cargar el stock inicial.")
+            st.success(
+                f"✅ '{nombre}' creado. "
+                "Ahora ve a **📦 Inventario → Llegó mercancía** para cargar el stock inicial."
+            )
             st.rerun()
 
     if cancelar:
@@ -440,7 +619,7 @@ def _form_nuevo_insumo(restaurante: dict):
         st.rerun()
 
 
-# ── Tab 3: Historial ───────────────────────────────────────────────────────────
+# ── Tab 4: Historial ───────────────────────────────────────────────────────────
 
 def _tab_historial(restaurante: dict):
     ingredientes = obtener_ingredientes(restaurante["id"])
@@ -449,23 +628,22 @@ def _tab_historial(restaurante: dict):
         return
 
     st.markdown("### Todo lo que ha pasado con tu inventario")
-    st.caption("Aquí queda el registro de cada compra, descarte o ajuste que hayas hecho.")
 
     col1, col2 = st.columns(2)
     with col1:
-        ops_ing = {"Todos los insumos": None}
+        ops_ing  = {"Todos los insumos": None}
         ops_ing.update({i["name"]: i["id"] for i in ingredientes})
-        ing_sel = st.selectbox("Insumo", list(ops_ing.keys()), key="hist_ing")
-        ing_id  = ops_ing[ing_sel]
+        ing_sel  = st.selectbox("Insumo", list(ops_ing.keys()), key="hist_ing")
+        ing_id   = ops_ing[ing_sel]
     with col2:
         ETIQUETAS = {
-            "Todos": "Todos",
+            "Todos":   "Todos",
             "entrada": "📥 Llegó mercancía",
+            "salida":  "📤 Salió mercancía",
             "merma":   "🗑️ Se dañó o venció",
             "ajuste":  "🔢 Conteo / ajuste",
-            "salida":  "📤 Salida especial",
         }
-        tipo_sel = st.selectbox("Tipo de movimiento", list(ETIQUETAS.values()), key="hist_tipo")
+        tipo_sel = st.selectbox("Tipo", list(ETIQUETAS.values()), key="hist_tipo")
         tipo_key = [k for k, v in ETIQUETAS.items() if v == tipo_sel][0]
 
     movs = obtener_movimientos(restaurante["id"], ing_id, limit=200)
@@ -476,16 +654,30 @@ def _tab_historial(restaurante: dict):
         st.info("No hay movimientos con esos filtros.")
         return
 
-    # KPIs
-    entradas = sum(float(m["quantity"]) for m in movs if m["type"] == "entrada")
-    mermas   = sum(abs(float(m["quantity"])) for m in movs if m["type"] == "merma")
-    col_e, col_m, col_t = st.columns(3)
-    with col_e:
-        st.metric("📥 Total comprado", f"{_fmt(entradas)}")
-    with col_m:
-        st.metric("🗑️ Total descartado", f"{_fmt(mermas)}")
-    with col_t:
-        st.metric("📋 Registros", len(movs))
+    # KPIs del historial
+    entradas     = sum(float(m["quantity"]) for m in movs if m["type"] == "entrada")
+    consumido    = sum(abs(float(m["quantity"])) for m in movs if m["type"] == "salida")
+    mermas       = sum(abs(float(m["quantity"])) for m in movs if m["type"] == "merma")
+    costo_cons   = sum(
+        abs(float(m["quantity"])) * float(m["cost_per_unit"])
+        for m in movs if m["type"] == "salida" and m.get("cost_per_unit")
+    )
+    costo_merma  = sum(
+        abs(float(m["quantity"])) * float(m["cost_per_unit"])
+        for m in movs if m["type"] == "merma" and m.get("cost_per_unit")
+    )
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("📥 Comprado", _fmt(entradas))
+    with col2:
+        st.metric("📤 Consumido", _fmt(consumido))
+    with col3:
+        st.metric("💲 Costo consumo", f"💲{costo_cons:,.0f}")
+    with col4:
+        st.metric("🗑️ Mermas", _fmt(mermas))
+    with col5:
+        st.metric("💲 Pérdida merma", f"💲{costo_merma:,.0f}")
 
     st.divider()
 
@@ -497,20 +689,23 @@ def _tab_historial(restaurante: dict):
         ing_data  = m.get("ingredients") or {}
         cantidad  = float(m["quantity"])
         signo     = "+" if cantidad >= 0 else ""
+        cpu       = float(m["cost_per_unit"]) if m.get("cost_per_unit") else 0.0
+        costo_total = abs(cantidad) * cpu if cpu else None
         etiqueta  = {
             "entrada": "📥 Compra",
+            "salida":  "📤 Consumo",
             "merma":   "🗑️ Descarte",
             "ajuste":  "🔢 Conteo",
-            "salida":  "📤 Salida",
         }.get(m["type"], m["type"])
 
         filas.append({
-            "Fecha":   fecha_col.strftime("%d/%m/%Y %H:%M"),
-            "Insumo":  ing_data.get("name", "—"),
-            "Qué pasó": etiqueta,
-            "Cantidad": f"{signo}{_fmt(cantidad)} {ing_data.get('unit', '')}",
-            "Detalle":  m.get("reason") or "—",
-            "Precio/u": f"💲{float(m['cost_per_unit']):,.0f}" if m.get("cost_per_unit") else "—",
+            "Fecha":        fecha_col.strftime("%d/%m/%Y %H:%M"),
+            "Insumo":       ing_data.get("name", "—"),
+            "Qué pasó":     etiqueta,
+            "Cantidad":     f"{signo}{_fmt(cantidad)} {ing_data.get('unit', '')}",
+            "Costo/u":      f"💲{cpu:,.0f}" if cpu else "—",
+            "Costo total":  f"💲{costo_total:,.0f}" if costo_total else "—",
+            "Detalle":      m.get("reason") or "—",
         })
 
     st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)

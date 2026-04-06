@@ -610,14 +610,17 @@ def _tab_dashboard(restaurante: dict):
         df_items = pd.DataFrame()
 
     # ── KPIs generales ─────────────────────────────────────────────────────────
-    col1, col2, col3, col4 = st.columns(4)
+    total_platos = int(df_items["quantity"].sum()) if not df_items.empty else 0
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("💰 Total ventas", f"💲{df['total'].sum():,.0f}")
     with col2:
-        st.metric("🧾 Cuentas cerradas", len(df))
+        st.metric("🪑 Mesas atendidas", len(df))
     with col3:
-        st.metric("📊 Promedio por cuenta", f"💲{df['total'].mean():,.0f}")
+        st.metric("🍽️ Platos vendidos", total_platos)
     with col4:
+        st.metric("📊 Promedio por mesa", f"💲{df['total'].mean():,.0f}")
+    with col5:
         st.metric("🏆 Ticket máximo", f"💲{df['total'].max():,.0f}")
 
     # ── Métricas de tiempo y operación ─────────────────────────────────────────
@@ -756,7 +759,7 @@ def _tab_dashboard(restaurante: dict):
     st.plotly_chart(fig2, use_container_width=True)
 
     # ── Tabla detalle ──────────────────────────────────────────────────────────
-    st.markdown("### Detalle de cuentas cerradas")
+    st.markdown("### Detalle de mesas atendidas")
     if not df_items.empty:
         platos_por_orden = df_items.groupby("order_id")["quantity"].sum()
         df["platos"] = df["id"].map(platos_por_orden).fillna(0).astype(int)

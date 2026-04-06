@@ -12,14 +12,25 @@ CATEGORIAS_INSUMOS = [
     "Otros",
 ]
 
-UNIDADES = ["kg", "g", "lt", "ml", "und", "paquete", "caja"]
+UNIDADES = ["kg", "g", "lt", "ml", "und", "libra", "paquete", "caja"]
 
-TIPOS_MOVIMIENTO = {
-    "entrada":  "📥 Entrada",
-    "salida":   "📤 Salida",
-    "ajuste":   "🔧 Ajuste",
-    "merma":    "🗑️ Merma / Desperdicio",
-}
+
+def nivel_alerta(ingrediente: dict) -> str:
+    """
+    Retorna el nivel de alerta según dos umbrales:
+      'rojo'     → stock <= stock_critical
+      'amarillo' → stock <= stock_min
+      'verde'    → stock > stock_min
+    """
+    stock = float(ingrediente["stock_current"])
+    critico = float(ingrediente.get("stock_critical") or 0)
+    minimo  = float(ingrediente.get("stock_min") or 0)
+
+    if stock <= critico:
+        return "rojo"
+    if stock <= minimo:
+        return "amarillo"
+    return "verde"
 
 
 # ── Ingredientes ───────────────────────────────────────────────────────────────
@@ -37,31 +48,9 @@ def obtener_ingredientes(restaurant_id: str) -> list:
     )
 
 
-def obtener_ingrediente(ingredient_id: str) -> dict | None:
-    supabase = get_supabase()
-    resultado = (
-        supabase.table("ingredients")
-        .select("*")
-        .eq("id", ingredient_id)
-        .limit(1)
-        .execute()
-        .data
-    )
-    return resultado[0] if resultado else None
-
-
-def obtener_ingredientes_bajo_minimo(restaurant_id: str) -> list:
-    """Ingredientes con stock_current <= stock_min (incluye sin stock)."""
-    ingredientes = obtener_ingredientes(restaurant_id)
-    return [
-        i for i in ingredientes
-        if float(i["stock_current"]) <= float(i["stock_min"])
-    ]
-
-
 def crear_ingrediente(restaurant_id: str, nombre: str, unidad: str,
-                      stock_min: float, costo_unitario: float,
-                      categoria: str) -> dict:
+                      stock_min: float, stock_critical: float,
+                      costo_unitario: float, categoria: str) -> dict:
     supabase = get_supabase()
     return (
         supabase.table("ingredients")
@@ -71,6 +60,7 @@ def crear_ingrediente(restaurant_id: str, nombre: str, unidad: str,
             "unit": unidad,
             "stock_current": 0.0,
             "stock_min": stock_min,
+            "stock_critical": stock_critical,
             "cost_per_unit": costo_unitario,
             "category": categoria,
         })
@@ -98,10 +88,10 @@ def registrar_movimiento(restaurant_id: str, ingredient_id: str,
     Registra un movimiento y actualiza stock_current.
 
     tipo:
-      'entrada'  → suma cantidad al stock (puede actualizar costo_per_unit)
-      'salida'   → resta cantidad al stock
-      'merma'    → igual que salida pero etiquetado como desperdicio
-      'ajuste'   → cantidad es el NUEVO stock total (conteo físico)
+      'entrada'  → suma cantidad. Si llega precio, actualiza cost_per_unit.
+      'salida'   → resta cantidad. Calcula costo proporcional automáticamente.
+      'merma'    → igual que salida. Calcula costo proporcional.
+      'ajuste'   → cantidad es el NUEVO stock total (conteo físico).
     """
     supabase = get_supabase()
 
@@ -112,19 +102,25 @@ def registrar_movimiento(restaurant_id: str, ingredient_id: str,
         .execute()
         .data[0]
     )
-    stock_actual = float(ingrediente["stock_current"])
+    stock_actual   = float(ingrediente["stock_current"])
+    costo_actual   = float(ingrediente["cost_per_unit"])
 
     if tipo == "entrada":
-        delta = cantidad
+        delta      = cantidad
         nuevo_stock = stock_actual + cantidad
-    elif tipo in ("salida", "merma"):
-        delta = -cantidad
-        nuevo_stock = max(0.0, stock_actual - cantidad)
-    else:  # ajuste
-        delta = cantidad - stock_actual
-        nuevo_stock = cantidad
+        costo_mov  = costo_unitario  # puede ser None si no se ingresó precio
 
-    # Insertar movimiento
+    elif tipo in ("salida", "merma"):
+        delta       = -cantidad
+        nuevo_stock = max(0.0, stock_actual - cantidad)
+        # Costo proporcional: (cantidad_salida × costo_unitario_actual)
+        costo_mov   = costo_actual  # registramos el costo/u vigente al momento
+
+    else:  # ajuste
+        delta       = cantidad - stock_actual
+        nuevo_stock = cantidad
+        costo_mov   = None
+
     mov = (
         supabase.table("stock_movements")
         .insert({
@@ -133,13 +129,13 @@ def registrar_movimiento(restaurant_id: str, ingredient_id: str,
             "type": tipo,
             "quantity": delta,
             "reason": motivo or None,
-            "cost_per_unit": costo_unitario,
+            "cost_per_unit": costo_mov,
         })
         .execute()
         .data[0]
     )
 
-    # Actualizar stock y costo si viene con precio
+    # Actualizar stock; si es entrada con precio, actualizar costo también
     update_data: dict = {"stock_current": nuevo_stock}
     if tipo == "entrada" and costo_unitario and costo_unitario > 0:
         update_data["cost_per_unit"] = costo_unitario
@@ -151,7 +147,7 @@ def registrar_movimiento(restaurant_id: str, ingredient_id: str,
 
 def obtener_movimientos(restaurant_id: str,
                         ingredient_id: str | None = None,
-                        limit: int = 100) -> list:
+                        limit: int = 200) -> list:
     supabase = get_supabase()
     query = (
         supabase.table("stock_movements")
@@ -166,9 +162,38 @@ def obtener_movimientos(restaurant_id: str,
 
 
 def valor_total_inventario(restaurant_id: str) -> float:
-    """Calcula el valor monetario total del inventario actual."""
     ingredientes = obtener_ingredientes(restaurant_id)
     return sum(
         float(i["stock_current"]) * float(i["cost_per_unit"])
         for i in ingredientes
     )
+
+
+def resumen_costos(restaurant_id: str) -> dict:
+    """
+    Calcula totales de inversión, consumo y mermas para el dashboard de stock.
+    Retorna:
+      invertido     → suma de (cantidad_entrada × costo/u) de todas las entradas
+      costo_consumo → suma de (|cantidad| × costo/u) de todas las salidas
+      costo_merma   → suma de (|cantidad| × costo/u) de todas las mermas
+    """
+    movs = obtener_movimientos(restaurant_id, limit=2000)
+    invertido     = 0.0
+    costo_consumo = 0.0
+    costo_merma   = 0.0
+
+    for m in movs:
+        qty   = abs(float(m["quantity"]))
+        cpu   = float(m["cost_per_unit"]) if m.get("cost_per_unit") else 0.0
+        if m["type"] == "entrada":
+            invertido     += qty * cpu
+        elif m["type"] == "salida":
+            costo_consumo += qty * cpu
+        elif m["type"] == "merma":
+            costo_merma   += qty * cpu
+
+    return {
+        "invertido":     invertido,
+        "costo_consumo": costo_consumo,
+        "costo_merma":   costo_merma,
+    }
