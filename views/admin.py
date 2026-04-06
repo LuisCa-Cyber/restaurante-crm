@@ -6,7 +6,7 @@ import plotly.express as px
 from datetime import date, timedelta, datetime, timezone
 
 from utils.auth import verificar_password_admin
-from views.stock_ui import mostrar_stock
+from views.stock_ui import mostrar_stock, mostrar_analisis_stock
 from database.menu import (
     obtener_todos_los_platos, crear_plato, actualizar_plato,
     eliminar_plato, toggle_disponible, toggle_plato_del_dia, actualizar_imagen
@@ -54,8 +54,8 @@ MODULOS = [
     {
         "key": "dashboard",
         "icon": "📊",
-        "nombre": "Dashboard",
-        "desc": "Ventas, métricas y reportes por período",
+        "nombre": "Dashboards",
+        "desc": "Ventas, métricas de stock y reportes por período",
     },
 ]
 
@@ -572,6 +572,14 @@ def _tab_stock(restaurante: dict):
 # ── Tab 5: Dashboard ──────────────────────────────────────────────────────────
 
 def _tab_dashboard(restaurante: dict):
+    tab_ventas, tab_stock = st.tabs(["📈 Métricas de ventas", "📦 Costos de stock"])
+    with tab_ventas:
+        _dash_ventas(restaurante)
+    with tab_stock:
+        mostrar_analisis_stock(restaurante)
+
+
+def _dash_ventas(restaurante: dict):
     st.markdown("### 📊 Dashboard de ventas")
 
     col1, col2 = st.columns(2)

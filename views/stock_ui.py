@@ -41,20 +41,22 @@ ICONO = {"verde": "🟢", "amarillo": "🟡", "rojo": "🔴"}
 
 
 def mostrar_stock(restaurante: dict):
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3 = st.tabs([
         "📦 Inventario",
-        "📊 Análisis de costos",
         "🥩 Mis insumos",
         "📋 Historial",
     ])
     with tab1:
         _tab_inventario(restaurante)
     with tab2:
-        _tab_analisis(restaurante)
-    with tab3:
         _tab_insumos(restaurante)
-    with tab4:
+    with tab3:
         _tab_historial(restaurante)
+
+
+def mostrar_analisis_stock(restaurante: dict):
+    """Expuesto para usarse desde el Dashboard."""
+    _tab_analisis(restaurante)
 
 
 # ── Tab 1: Inventario ─────────────────────────────────────────────────────────
@@ -69,19 +71,30 @@ def _tab_inventario(restaurante: dict):
 
     accion_activa = st.session_state.get("stock_accion")
     if accion_activa:
-        _formulario_accion(restaurante, ingredientes, accion_activa)
+        # Para salida/merma solo mostrar los que tienen stock > 0
+        if accion_activa in ("salió", "dañó"):
+            lista_accion = [i for i in ingredientes if float(i["stock_current"]) > 0]
+            if not lista_accion:
+                st.warning("No hay insumos con stock disponible para registrar esta acción.")
+                st.session_state.pop("stock_accion", None)
+                st.rerun()
+                return
+        else:
+            lista_accion = ingredientes
+        _formulario_accion(restaurante, lista_accion, accion_activa)
         return
 
     # ── Botones de acción ─────────────────────────────────────────────────────
     st.markdown("### ¿Qué pasó hoy con el inventario?")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if st.button("📥 Llegó mercancía", use_container_width=True, type="primary",
-                     help="Registra una compra o entrega de proveedor"):
+        if st.button("📥 Llegó mercancía", use_container_width=True,
+                     help="Registra una compra o entrega de proveedor",
+                     type="primary"):
             st.session_state["stock_accion"] = "llegó"
             st.rerun()
     with col2:
-        if st.button("📤 Salió mercancía", use_container_width=True, type="primary",
+        if st.button("📤 Salió mercancía", use_container_width=True,
                      help="Registra lo que usaste hoy en cocina"):
             st.session_state["stock_accion"] = "salió"
             st.rerun()
