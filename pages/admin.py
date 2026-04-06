@@ -25,12 +25,44 @@ CATEGORIAS = ["Sopas", "Plato del día", "Parrilla", "Adiciones", "Postres", "Ot
 # Categorías que aparecen en el tab de plato del día
 CATEGORIAS_PLATO_DIA = {"Sopas", "Plato del día", "Parrilla", "Adiciones", "Postres", "Otros"}
 
+MODULOS = [
+    {
+        "key": "programacion",
+        "icon": "☀️",
+        "nombre": "Programación del día",
+        "desc": "Activa los platos del día y gestiona el menú completo",
+    },
+    {
+        "key": "caja",
+        "icon": "🏪",
+        "nombre": "Caja y servicio",
+        "desc": "Órdenes activas, pendientes de entrega y cierre de cuentas",
+    },
+    {
+        "key": "equipo",
+        "icon": "👥",
+        "nombre": "Equipo y mesas",
+        "desc": "Configuración de mesas y gestión del personal",
+    },
+    {
+        "key": "stock",
+        "icon": "📦",
+        "nombre": "Stock",
+        "desc": "Control de inventario y niveles de existencias",
+    },
+    {
+        "key": "dashboard",
+        "icon": "📊",
+        "nombre": "Dashboard",
+        "desc": "Ventas, métricas y reportes por período",
+    },
+]
+
 
 def mostrar_vista_admin(restaurante: dict):
-    st.button("← Volver", on_click=_cerrar_sesion)
-    st.title(f"⚙️ Admin — {restaurante['name']}")
-
     if not st.session_state.get("admin_autenticado"):
+        st.button("← Volver", on_click=_cerrar_sesion)
+        st.title(f"⚙️ Admin — {restaurante['name']}")
         _pedir_password(restaurante)
     else:
         _panel_admin(restaurante)
@@ -38,7 +70,7 @@ def mostrar_vista_admin(restaurante: dict):
 
 def _cerrar_sesion():
     st.session_state.update({"modo": None, "admin_autenticado": False,
-                              "orden_cerrando_id": None})
+                              "orden_cerrando_id": None, "admin_modulo": None})
 
 
 def _pedir_password(restaurante: dict):
@@ -55,22 +87,61 @@ def _pedir_password(restaurante: dict):
 
 
 def _panel_admin(restaurante: dict):
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "☀️ Programación del día",
-        "🏪 Caja y servicio",
-        "👥 Equipo y mesas",
-        "📦 Stock",
-        "📊 Dashboard",
-    ])
-    with tab1:
+    modulo = st.session_state.get("admin_modulo")
+    if modulo:
+        _vista_modulo(restaurante, modulo)
+    else:
+        _vista_modulos(restaurante)
+
+
+def _vista_modulos(restaurante: dict):
+    col_titulo, col_salir = st.columns([4, 1])
+    with col_titulo:
+        st.title(f"⚙️ {restaurante['name']}")
+    with col_salir:
+        st.markdown("")
+        if st.button("Salir", use_container_width=True):
+            _cerrar_sesion()
+            st.rerun()
+
+    st.markdown("### Selecciona un módulo")
+    st.divider()
+
+    cols = st.columns(3)
+    for i, mod in enumerate(MODULOS):
+        with cols[i % 3]:
+            with st.container(border=True):
+                st.markdown(f"## {mod['icon']}")
+                st.markdown(f"**{mod['nombre']}**")
+                st.caption(mod["desc"])
+                st.markdown("")
+                if st.button("Abrir →", key=f"mod_{mod['key']}",
+                             use_container_width=True, type="primary"):
+                    st.session_state["admin_modulo"] = mod["key"]
+                    st.rerun()
+
+
+def _vista_modulo(restaurante: dict, modulo: str):
+    info = next(m for m in MODULOS if m["key"] == modulo)
+    col_titulo, col_volver = st.columns([4, 1])
+    with col_titulo:
+        st.title(f"{info['icon']} {info['nombre']}")
+    with col_volver:
+        st.markdown("")
+        if st.button("← Módulos", use_container_width=True):
+            st.session_state["admin_modulo"] = None
+            st.rerun()
+    st.divider()
+
+    if modulo == "programacion":
         _tab_programacion_dia(restaurante)
-    with tab2:
+    elif modulo == "caja":
         _tab_caja_servicio(restaurante)
-    with tab3:
+    elif modulo == "equipo":
         _tab_configuracion(restaurante)
-    with tab4:
+    elif modulo == "stock":
         _tab_stock(restaurante)
-    with tab5:
+    elif modulo == "dashboard":
         _tab_dashboard(restaurante)
 
 
