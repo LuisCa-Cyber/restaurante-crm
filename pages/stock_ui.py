@@ -121,47 +121,23 @@ def _tab_inventario(restaurante: dict):
         if rojos:
             st.markdown("**🔴 Urgente — stock crítico:**")
             for i in rojos:
-                col_a, col_b, col_c = st.columns([4, 1, 1])
-                with col_a:
-                    st.error(
-                        f"🔴 **{i['name']}** — "
-                        f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
-                        f"Crítico: {_fmt(i['stock_critical'])} {i['unit']}"
-                    )
-                with col_b:
-                    if st.button("📥 Comprar", key=f"r_comprar_{i['id']}", use_container_width=True):
-                        st.session_state["stock_accion"]     = "llegó"
-                        st.session_state["stock_ing_presel"] = i["id"]
-                        st.rerun()
-                with col_c:
-                    if st.button("📤 Usar", key=f"r_usar_{i['id']}", use_container_width=True):
-                        st.session_state["stock_accion"]     = "salió"
-                        st.session_state["stock_ing_presel"] = i["id"]
-                        st.rerun()
+                st.error(
+                    f"🔴 **{i['name']}** — "
+                    f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
+                    f"Crítico: {_fmt(i['stock_critical'])} {i['unit']}"
+                )
 
         if amarillos:
             st.markdown("**🟡 Pronto se acabará:**")
             for i in amarillos:
                 minimo = float(i["stock_min"])
                 pct    = float(i["stock_current"]) / minimo * 100 if minimo > 0 else 0
-                col_a, col_b, col_c = st.columns([4, 1, 1])
-                with col_a:
-                    st.warning(
-                        f"🟡 **{i['name']}** — "
-                        f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
-                        f"Mínimo: {_fmt(i['stock_min'])} {i['unit']}  |  {pct:.0f}% del mínimo"
-                    )
-                    st.progress(min(pct / 100, 1.0))
-                with col_b:
-                    if st.button("📥 Comprar", key=f"a_comprar_{i['id']}", use_container_width=True):
-                        st.session_state["stock_accion"]     = "llegó"
-                        st.session_state["stock_ing_presel"] = i["id"]
-                        st.rerun()
-                with col_c:
-                    if st.button("📤 Usar", key=f"a_usar_{i['id']}", use_container_width=True):
-                        st.session_state["stock_accion"]     = "salió"
-                        st.session_state["stock_ing_presel"] = i["id"]
-                        st.rerun()
+                st.warning(
+                    f"🟡 **{i['name']}** — "
+                    f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
+                    f"Mínimo: {_fmt(i['stock_min'])} {i['unit']}  |  {pct:.0f}% del mínimo"
+                )
+                st.progress(min(pct / 100, 1.0))
     else:
         st.success("✅ Todo el inventario está sobre el mínimo.")
 
@@ -174,17 +150,17 @@ def _tab_inventario(restaurante: dict):
     lista   = ingredientes if cat_sel == "Todas" else [i for i in ingredientes if i["category"] == cat_sel]
 
     # Cabecera
-    hdr = st.columns([3, 2, 2, 2, 1, 1])
-    for col, txt in zip(hdr, ["Insumo", "Stock actual", "Costo / unidad", "Valor en bodega", "", ""]):
+    hdr = st.columns([3, 2, 2, 2])
+    for col, txt in zip(hdr, ["Insumo", "Stock actual", "Costo / unidad", "Valor en bodega"]):
         col.caption(txt)
 
     for item in lista:
-        stock     = float(item["stock_current"])
-        alerta    = nivel_alerta(item)
-        icono     = ICONO[alerta]
+        stock      = float(item["stock_current"])
+        alerta     = nivel_alerta(item)
+        icono      = ICONO[alerta]
         valor_item = stock * float(item["cost_per_unit"])
 
-        col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 2, 2, 1, 1])
+        col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
         with col1:
             st.markdown(f"{icono} **{item['name']}**")
             st.caption(item["category"])
@@ -195,16 +171,6 @@ def _tab_inventario(restaurante: dict):
             st.markdown(f"💲{float(item['cost_per_unit']):,.0f}/{item['unit']}")
         with col4:
             st.markdown(f"💰 💲{valor_item:,.0f}")
-        with col5:
-            if st.button("📥", key=f"inv_in_{item['id']}", help="Llegó mercancía"):
-                st.session_state["stock_accion"]     = "llegó"
-                st.session_state["stock_ing_presel"] = item["id"]
-                st.rerun()
-        with col6:
-            if st.button("📤", key=f"inv_out_{item['id']}", help="Salió mercancía"):
-                st.session_state["stock_accion"]     = "salió"
-                st.session_state["stock_ing_presel"] = item["id"]
-                st.rerun()
 
 
 # ── Formulario de acción ──────────────────────────────────────────────────────
