@@ -1,18 +1,24 @@
 # database/tables_db.py — Gestión de mesas del restaurante
 
+import re
 from database.supabase_client import get_supabase
+
+
+def _natural_key(mesa: dict):
+    """Ordena por nombre con números como enteros (Mesa 2 antes que Mesa 10)."""
+    return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", mesa["name"])]
 
 
 def obtener_mesas(restaurant_id: str) -> list:
     supabase = get_supabase()
-    return (
+    mesas = (
         supabase.table("tables")
         .select("*")
         .eq("restaurant_id", restaurant_id)
-        .order("name")
         .execute()
         .data
     )
+    return sorted(mesas, key=_natural_key)
 
 
 def crear_mesa(restaurant_id: str, nombre: str) -> dict:

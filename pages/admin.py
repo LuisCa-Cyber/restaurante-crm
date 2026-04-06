@@ -589,8 +589,13 @@ def _tab_dashboard(restaurante: dict):
 
         df_filtrado = df_items if cat_filtro == "Todas" else df_items[df_items["categoria"] == cat_filtro]
 
+        df_filtrado = df_filtrado.copy()
+        df_filtrado["plato_base"] = df_filtrado["menu_item_name"].str.replace(
+            r"\s*\(con [^)]+\)$", "", regex=True
+        )
+
         ranking = (
-            df_filtrado.groupby("menu_item_name")
+            df_filtrado.groupby("plato_base")
             .agg(cantidad=("quantity", "sum"), ingresos=("ingresos", "sum"))
             .reset_index()
             .sort_values("cantidad", ascending=False)
@@ -599,11 +604,11 @@ def _tab_dashboard(restaurante: dict):
         ranking.index = range(1, len(ranking) + 1)
 
         fig_top = px.bar(
-            ranking.reset_index(), x="menu_item_name", y="cantidad",
+            ranking.reset_index(), x="plato_base", y="cantidad",
             title=f"Top 10 platos — {cat_filtro}",
             color_discrete_sequence=["#6C5CE7"],
             text="cantidad",
-            labels={"menu_item_name": "Plato", "cantidad": "Unidades vendidas"},
+            labels={"plato_base": "Plato", "cantidad": "Unidades vendidas"},
         )
         fig_top.update_traces(textposition="outside")
         fig_top.update_layout(xaxis_tickangle=-30, showlegend=False)
