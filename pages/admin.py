@@ -6,6 +6,7 @@ import plotly.express as px
 from datetime import date, timedelta, datetime, timezone
 
 from utils.auth import verificar_password_admin
+from pages.stock_ui import mostrar_stock
 from database.menu import (
     obtener_todos_los_platos, crear_plato, actualizar_plato,
     eliminar_plato, toggle_disponible, toggle_plato_del_dia, actualizar_imagen
@@ -564,9 +565,8 @@ def _tab_configuracion(restaurante: dict):
 
 # ── Tab 4: Stock ──────────────────────────────────────────────────────────────
 
-def _tab_stock(_restaurante: dict):
-    st.markdown("### 📦 Gestión de Stock")
-    st.info("Módulo en construcción. Aquí podrás registrar ingredientes, ver niveles de inventario y recibir alertas de stock bajo.")
+def _tab_stock(restaurante: dict):
+    mostrar_stock(restaurante)
 
 
 # ── Tab 5: Dashboard ──────────────────────────────────────────────────────────
