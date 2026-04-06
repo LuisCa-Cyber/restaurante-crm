@@ -9,7 +9,7 @@ from database.stock_db import (
     CATEGORIAS_INSUMOS, UNIDADES, nivel_alerta,
     obtener_ingredientes, crear_ingrediente, actualizar_ingrediente,
     eliminar_ingrediente, registrar_movimiento, obtener_movimientos,
-    valor_total_inventario, resumen_costos,
+    valor_total_inventario,
 )
 
 COL_TZ = timezone(timedelta(hours=-5))
@@ -98,10 +98,14 @@ def _tab_inventario(restaurante: dict):
 
     st.divider()
 
+    # ── Filtro de categoría (arriba de todo) ─────────────────────────────────
+    cats    = ["Todas"] + sorted(set(i["category"] for i in ingredientes))
+    cat_sel = st.selectbox("Filtrar por categoría", cats, key="inv_cat")
+
     # ── KPIs ──────────────────────────────────────────────────────────────────
-    rojos    = [i for i in ingredientes if nivel_alerta(i) == "rojo"]
+    rojos     = [i for i in ingredientes if nivel_alerta(i) == "rojo"]
     amarillos = [i for i in ingredientes if nivel_alerta(i) == "amarillo"]
-    valor    = valor_total_inventario(restaurante["id"])
+    valor     = valor_total_inventario(restaurante["id"])
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -113,64 +117,65 @@ def _tab_inventario(restaurante: dict):
     with col4:
         st.metric("🔴 Reponer urgente", len(rojos))
 
-    # ── Alertas ───────────────────────────────────────────────────────────────
-    if rojos or amarillos:
+    # ── Alertas agrupadas por categoría ──────────────────────────────────────
+    alertas = rojos + amarillos
+    if cat_sel != "Todas":
+        alertas = [i for i in alertas if i["category"] == cat_sel]
+
+    if alertas:
         st.divider()
         st.markdown("### ⚠️ Necesitan atención")
-
-        if rojos:
-            st.markdown("**🔴 Urgente — stock crítico:**")
-            for i in rojos:
-                st.error(
-                    f"🔴 **{i['name']}** — "
-                    f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
-                    f"Crítico: {_fmt(i['stock_critical'])} {i['unit']}"
-                )
-
-        if amarillos:
-            st.markdown("**🟡 Pronto se acabará:**")
-            for i in amarillos:
-                minimo = float(i["stock_min"])
-                pct    = float(i["stock_current"]) / minimo * 100 if minimo > 0 else 0
-                st.warning(
-                    f"🟡 **{i['name']}** — "
-                    f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
-                    f"Mínimo: {_fmt(i['stock_min'])} {i['unit']}  |  {pct:.0f}% del mínimo"
-                )
-                st.progress(min(pct / 100, 1.0))
+        cats_alerta = sorted(set(i["category"] for i in alertas))
+        for cat in cats_alerta:
+            st.markdown(f"#### {cat}")
+            for i in [x for x in alertas if x["category"] == cat]:
+                alerta = nivel_alerta(i)
+                if alerta == "rojo":
+                    st.error(
+                        f"🔴 **{i['name']}** — "
+                        f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
+                        f"Crítico: {_fmt(i['stock_critical'])} {i['unit']}"
+                    )
+                else:
+                    minimo = float(i["stock_min"])
+                    pct    = float(i["stock_current"]) / minimo * 100 if minimo > 0 else 0
+                    st.warning(
+                        f"🟡 **{i['name']}** — "
+                        f"{_fmt(i['stock_current'])} {i['unit']} disponibles  |  "
+                        f"Mínimo: {_fmt(i['stock_min'])} {i['unit']}  |  {pct:.0f}% del mínimo"
+                    )
+                    st.progress(min(pct / 100, 1.0))
     else:
         st.success("✅ Todo el inventario está sobre el mínimo.")
 
-    # ── Estado general ────────────────────────────────────────────────────────
+    # ── Estado actual agrupado por categoría ─────────────────────────────────
     st.divider()
     st.markdown("### Estado actual")
 
-    cats    = ["Todas"] + sorted(set(i["category"] for i in ingredientes))
-    cat_sel = st.selectbox("Categoría", cats, key="inv_cat", label_visibility="collapsed")
-    lista   = ingredientes if cat_sel == "Todas" else [i for i in ingredientes if i["category"] == cat_sel]
+    lista = ingredientes if cat_sel == "Todas" else [i for i in ingredientes if i["category"] == cat_sel]
+    cats_lista = sorted(set(i["category"] for i in lista))
 
-    # Cabecera
-    hdr = st.columns([3, 2, 2, 2])
-    for col, txt in zip(hdr, ["Insumo", "Stock actual", "Costo / unidad", "Valor en bodega"]):
-        col.caption(txt)
-
-    for item in lista:
-        stock      = float(item["stock_current"])
-        alerta     = nivel_alerta(item)
-        icono      = ICONO[alerta]
-        valor_item = stock * float(item["cost_per_unit"])
-
-        col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
-        with col1:
-            st.markdown(f"{icono} **{item['name']}**")
-            st.caption(item["category"])
-        with col2:
-            st.markdown(f"**{_fmt(item['stock_current'])} {item['unit']}**")
-            st.caption(f"Mín: {_fmt(item['stock_min'])}  |  Crítico: {_fmt(item['stock_critical'])}")
-        with col3:
-            st.markdown(f"💲{float(item['cost_per_unit']):,.0f}/{item['unit']}")
-        with col4:
-            st.markdown(f"💰 💲{valor_item:,.0f}")
+    for cat in cats_lista:
+        st.markdown(f"#### {cat}")
+        hdr = st.columns([3, 2, 2, 2])
+        for col, txt in zip(hdr, ["Insumo", "Stock actual", "Costo / unidad", "Valor en bodega"]):
+            col.caption(txt)
+        for item in [x for x in lista if x["category"] == cat]:
+            stock      = float(item["stock_current"])
+            alerta     = nivel_alerta(item)
+            icono      = ICONO[alerta]
+            valor_item = stock * float(item["cost_per_unit"])
+            col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+            with col1:
+                st.markdown(f"{icono} **{item['name']}**")
+            with col2:
+                st.markdown(f"**{_fmt(item['stock_current'])} {item['unit']}**")
+                st.caption(f"Mín: {_fmt(item['stock_min'])}  |  Crítico: {_fmt(item['stock_critical'])}")
+            with col3:
+                st.markdown(f"💲{float(item['cost_per_unit']):,.0f}/{item['unit']}")
+            with col4:
+                st.markdown(f"💰 💲{valor_item:,.0f}")
+        st.divider()
 
 
 # ── Formulario de acción ──────────────────────────────────────────────────────
@@ -327,31 +332,56 @@ def _tab_analisis(restaurante: dict):
         st.info("Sin datos aún.")
         return
 
-    resumen = resumen_costos(restaurante["id"])
-    valor   = valor_total_inventario(restaurante["id"])
-
     st.markdown("### 📊 Análisis de costos del inventario")
+
+    # ── Filtro de fechas ──────────────────────────────────────────────────────
+    hoy = datetime.now(COL_TZ).date()
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        fecha_desde = st.date_input("Desde", value=hoy.replace(day=1), key="an_desde")
+    with col_f2:
+        fecha_hasta = st.date_input("Hasta", value=hoy, key="an_hasta")
+
+    movs_todos = obtener_movimientos(restaurante["id"], limit=5000)
+
+    # Filtrar por rango de fechas
+    def en_rango(m):
+        ts = m["created_at"][:10]
+        return str(fecha_desde) <= ts <= str(fecha_hasta)
+
+    movs = [m for m in movs_todos if en_rango(m)]
+
+    # Calcular resumen con los movimientos filtrados
+    invertido = consumo = merma = 0.0
+    for m in movs:
+        qty = abs(float(m["quantity"]))
+        cpu = float(m["cost_per_unit"]) if m.get("cost_per_unit") else 0.0
+        if m["type"] == "entrada":   invertido += qty * cpu
+        elif m["type"] == "salida":  consumo   += qty * cpu
+        elif m["type"] == "merma":   merma     += qty * cpu
+
+    valor = valor_total_inventario(restaurante["id"])
 
     # KPIs
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("💰 Valor actual en bodega", f"💲{valor:,.0f}")
     with col2:
-        st.metric("📥 Total invertido (compras)", f"💲{resumen['invertido']:,.0f}")
+        st.metric("📥 Total invertido (compras)", f"💲{invertido:,.0f}")
     with col3:
-        st.metric("📤 Costo de lo consumido", f"💲{resumen['costo_consumo']:,.0f}")
+        st.metric("📤 Costo de lo consumido", f"💲{consumo:,.0f}")
     with col4:
-        st.metric("🗑️ Pérdidas por merma", f"💲{resumen['costo_merma']:,.0f}",
-                  delta=f"-💲{resumen['costo_merma']:,.0f}" if resumen['costo_merma'] > 0 else None,
+        st.metric("🗑️ Pérdidas por merma", f"💲{merma:,.0f}",
+                  delta=f"-💲{merma:,.0f}" if merma > 0 else None,
                   delta_color="inverse")
 
     st.divider()
 
     # Gráfica: composición del gasto
-    if resumen["invertido"] > 0:
+    if invertido > 0:
         df_torta = pd.DataFrame({
             "Categoría": ["En bodega", "Consumido", "Mermas"],
-            "Valor":     [valor, resumen["costo_consumo"], resumen["costo_merma"]],
+            "Valor":     [valor, consumo, merma],
         })
         df_torta = df_torta[df_torta["Valor"] > 0]
         fig = px.pie(df_torta, names="Categoría", values="Valor",
@@ -366,8 +396,6 @@ def _tab_analisis(restaurante: dict):
     st.markdown("#### Costo proporcional por insumo (regla de tres)")
     st.caption("Para cada insumo: cuánto costó lo que ya salió y lo que se dañó, "
                "calculado con el precio de compra vigente.")
-
-    movs = obtener_movimientos(restaurante["id"], limit=2000)
 
     filas = []
     for ing in ingredientes:
@@ -474,62 +502,65 @@ def _tab_insumos(restaurante: dict):
         lista = [i for i in lista if busq.lower() in i["name"].lower()]
 
     st.caption(f"{len(lista)} insumo(s)")
-    st.divider()
 
-    for item in lista:
-        alerta = nivel_alerta(item)
-        icono  = ICONO[alerta]
+    cats_lista = sorted(set(i["category"] for i in lista))
+    for cat in cats_lista:
+        st.divider()
+        st.markdown(f"### {cat}")
+        for item in [x for x in lista if x["category"] == cat]:
+            alerta = nivel_alerta(item)
+            icono  = ICONO[alerta]
 
-        with st.expander(
-            f"{icono} **{item['name']}** — "
-            f"{_fmt(item['stock_current'])} {item['unit']} en bodega  |  "
-            f"Mín 🟡: {_fmt(item['stock_min'])}  |  "
-            f"Crítico 🔴: {_fmt(item['stock_critical'])}  |  "
-            f"💲{float(item['cost_per_unit']):,.0f}/{item['unit']}"
-        ):
-            with st.form(f"edit_{item['id']}"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    nombre    = st.text_input("Nombre", value=item["name"])
-                    u_idx     = UNIDADES.index(item["unit"]) if item["unit"] in UNIDADES else 0
-                    unidad    = st.selectbox("Unidad", UNIDADES, index=u_idx)
-                    c_idx     = CATEGORIAS_INSUMOS.index(item["category"]) if item["category"] in CATEGORIAS_INSUMOS else len(CATEGORIAS_INSUMOS) - 1
-                    categoria = st.selectbox("Categoría", CATEGORIAS_INSUMOS, index=c_idx)
-                with col2:
-                    stock_min = st.number_input(
-                        "🟡 Mínimo (aviso amarillo)",
-                        value=float(item["stock_min"]), min_value=0.0, step=0.5,
-                        help="Cuando baje de aquí se pone amarillo",
-                    )
-                    stock_crit = st.number_input(
-                        "🔴 Crítico (aviso rojo)",
-                        value=float(item.get("stock_critical") or 0), min_value=0.0, step=0.5,
-                        help="Cuando baje de aquí se pone rojo — hay que reponer urgente",
-                    )
-                    costo = st.number_input(
-                        "Costo por unidad (💲)",
-                        value=float(item["cost_per_unit"]), min_value=0.0, step=100.0,
-                    )
-                    st.metric("Stock actual", f"{_fmt(item['stock_current'])} {item['unit']}")
+            with st.expander(
+                f"{icono} **{item['name']}** — "
+                f"{_fmt(item['stock_current'])} {item['unit']} en bodega  |  "
+                f"Mín 🟡: {_fmt(item['stock_min'])}  |  "
+                f"Crítico 🔴: {_fmt(item['stock_critical'])}  |  "
+                f"💲{float(item['cost_per_unit']):,.0f}/{item['unit']}"
+            ):
+                with st.form(f"edit_{item['id']}"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        nombre    = st.text_input("Nombre", value=item["name"])
+                        u_idx     = UNIDADES.index(item["unit"]) if item["unit"] in UNIDADES else 0
+                        unidad    = st.selectbox("Unidad", UNIDADES, index=u_idx)
+                        c_idx     = CATEGORIAS_INSUMOS.index(item["category"]) if item["category"] in CATEGORIAS_INSUMOS else len(CATEGORIAS_INSUMOS) - 1
+                        categoria = st.selectbox("Categoría", CATEGORIAS_INSUMOS, index=c_idx)
+                    with col2:
+                        stock_min = st.number_input(
+                            "🟡 Mínimo (aviso amarillo)",
+                            value=float(item["stock_min"]), min_value=0.0, step=0.5,
+                            help="Cuando baje de aquí se pone amarillo",
+                        )
+                        stock_crit = st.number_input(
+                            "🔴 Crítico (aviso rojo)",
+                            value=float(item.get("stock_critical") or 0), min_value=0.0, step=0.5,
+                            help="Cuando baje de aquí se pone rojo — hay que reponer urgente",
+                        )
+                        costo = st.number_input(
+                            "Costo por unidad (💲)",
+                            value=float(item["cost_per_unit"]), min_value=0.0, step=100.0,
+                        )
+                        st.metric("Stock actual", f"{_fmt(item['stock_current'])} {item['unit']}")
 
-                col_g, col_e = st.columns(2)
-                with col_g:
-                    guardar  = st.form_submit_button("💾 Guardar", use_container_width=True)
-                with col_e:
-                    eliminar = st.form_submit_button("🗑️ Eliminar", use_container_width=True)
+                    col_g, col_e = st.columns(2)
+                    with col_g:
+                        guardar  = st.form_submit_button("💾 Guardar", use_container_width=True)
+                    with col_e:
+                        eliminar = st.form_submit_button("🗑️ Eliminar", use_container_width=True)
 
-            if guardar:
-                actualizar_ingrediente(item["id"], {
-                    "name": nombre, "unit": unidad, "category": categoria,
-                    "stock_min": stock_min, "stock_critical": stock_crit,
-                    "cost_per_unit": costo,
-                })
-                st.success("Guardado.")
-                st.rerun()
+                if guardar:
+                    actualizar_ingrediente(item["id"], {
+                        "name": nombre, "unit": unidad, "category": categoria,
+                        "stock_min": stock_min, "stock_critical": stock_crit,
+                        "cost_per_unit": costo,
+                    })
+                    st.success("Guardado.")
+                    st.rerun()
 
-            if eliminar:
-                eliminar_ingrediente(item["id"])
-                st.rerun()
+                if eliminar:
+                    eliminar_ingrediente(item["id"])
+                    st.rerun()
 
 
 def _form_nuevo_insumo(restaurante: dict):
@@ -542,6 +573,7 @@ def _form_nuevo_insumo(restaurante: dict):
             categoria = st.selectbox("Categoría *", CATEGORIAS_INSUMOS)
             unidad    = st.selectbox(
                 "¿En qué se mide? *", UNIDADES,
+                index=UNIDADES.index("libra"),
                 help="kg=kilos, lt=litros, und=unidades, libra=libras",
             )
         with col2:
