@@ -1,7 +1,9 @@
 # views/chat_ia.py — Módulo de chat con IA
 
+import json
 import streamlit as st
 from ai.agent import chat
+from database.chat_db import guardar_sesion, obtener_sesiones, eliminar_sesion
 
 PREGUNTAS_SUGERIDAS = [
     "¿Cuánto vendimos esta semana?",
@@ -16,17 +18,17 @@ PREGUNTAS_SUGERIDAS = [
 def mostrar_chat(restaurante: dict):
     if "chat_historial" not in st.session_state:
         st.session_state["chat_historial"] = []
-    if "chat_sesiones" not in st.session_state:
-        st.session_state["chat_sesiones"] = []  # lista de conversaciones pasadas
 
     col_chat, col_hist = st.columns([3, 1])
 
     with col_hist:
-        _panel_historial()
+        _panel_historial(restaurante)
 
     with col_chat:
         _panel_chat(restaurante)
 
+
+# ── Panel de chat ─────────────────────────────────────────────────────────────
 
 def _panel_chat(restaurante: dict):
     col_titulo, col_btn = st.columns([4, 1])
@@ -36,11 +38,8 @@ def _panel_chat(restaurante: dict):
     with col_btn:
         st.markdown("")
         if st.button("🔄 Nuevo chat", use_container_width=True):
-            _guardar_sesion_actual()
-            st.session_state["chat_historial"] = []
-            st.rerun()
+            _guardar_y_limpiar(restaurante)
 
-    # Sugerencias rápidas cuando no hay historial
     if not st.session_state["chat_historial"]:
         st.markdown("**Puedes preguntarme cosas como:**")
         cols = st.columns(3)
@@ -50,7 +49,6 @@ def _panel_chat(restaurante: dict):
                     _procesar(restaurante, pregunta)
         st.divider()
 
-    # Mensajes de la conversación actual
     for msg in st.session_state["chat_historial"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -59,47 +57,62 @@ def _panel_chat(restaurante: dict):
         _procesar(restaurante, prompt)
 
 
-def _panel_historial():
+# ── Panel de historial ────────────────────────────────────────────────────────
+
+def _panel_historial(restaurante: dict):
     st.markdown("### 🕘 Historial")
 
-    sesiones = st.session_state.get("chat_sesiones", [])
-
-    # Guardar sesión activa si tiene mensajes (para mostrarla en historial)
+    # Guardar conversación activa si tiene mensajes y se hizo scroll al historial
     historial_actual = st.session_state.get("chat_historial", [])
-
-    if not sesiones and not historial_actual:
-        st.caption("Aquí aparecerán tus conversaciones anteriores.")
-        return
-
-    # Conversación activa
     if historial_actual:
-        primer_msg = next((m["content"] for m in historial_actual if m["role"] == "user"), "Conversación actual")
-        with st.expander(f"💬 {primer_msg[:40]}...", expanded=False):
-            st.caption(f"{len([m for m in historial_actual if m['role'] == 'user'])} preguntas")
+        st.caption("**Conversación actual**")
+        titulo_actual = next(
+            (m["content"][:50] for m in historial_actual if m["role"] == "user"), "Sin título"
+        )
+        num_preguntas = sum(1 for m in historial_actual if m["role"] == "user")
+        st.info(f"💬 {titulo_actual}{'...' if len(titulo_actual)==50 else ''}\n\n_{num_preguntas} pregunta(s)_")
+        st.divider()
 
-    # Conversaciones pasadas
-    for idx, sesion in enumerate(reversed(sesiones)):
-        primer_msg = sesion["titulo"]
-        num_preguntas = sesion["preguntas"]
-        with st.expander(f"🗂️ {primer_msg[:35]}...", expanded=False):
-            st.caption(f"{num_preguntas} preguntas")
-            if st.button("Cargar", key=f"cargar_{idx}", use_container_width=True):
-                _guardar_sesion_actual()
-                st.session_state["chat_historial"] = sesion["mensajes"]
-                st.rerun()
+    sesiones = obtener_sesiones(restaurante["id"])
 
-
-def _guardar_sesion_actual():
-    historial = st.session_state.get("chat_historial", [])
-    if not historial:
+    if not sesiones:
+        st.caption("Aquí aparecerán tus conversaciones guardadas.")
         return
-    primer_msg = next((m["content"] for m in historial if m["role"] == "user"), "Conversación")
-    num_preguntas = len([m for m in historial if m["role"] == "user"])
-    st.session_state["chat_sesiones"].append({
-        "titulo": primer_msg,
-        "preguntas": num_preguntas,
-        "mensajes": historial.copy(),
-    })
+
+    st.caption(f"{len(sesiones)} conversación(es) guardada(s)")
+
+    for s in sesiones:
+        fecha = s["created_at"][:10]
+        titulo = s["titulo"][:40] + ("..." if len(s["titulo"]) > 40 else "")
+        mensajes = json.loads(s["mensajes"]) if isinstance(s["mensajes"], str) else s["mensajes"]
+        num_q = sum(1 for m in mensajes if m["role"] == "user")
+
+        with st.expander(f"🗂️ {titulo}"):
+            st.caption(f"📅 {fecha}  |  {num_q} pregunta(s)")
+            col_c, col_e = st.columns(2)
+            with col_c:
+                if st.button("Cargar", key=f"cargar_{s['id']}", use_container_width=True):
+                    _guardar_y_limpiar(restaurante)
+                    st.session_state["chat_historial"] = mensajes
+                    st.rerun()
+            with col_e:
+                if st.button("🗑️", key=f"del_{s['id']}", use_container_width=True,
+                             help="Eliminar esta conversación"):
+                    eliminar_sesion(s["id"])
+                    st.rerun()
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _guardar_y_limpiar(restaurante: dict):
+    historial = st.session_state.get("chat_historial", [])
+    if historial:
+        titulo = next(
+            (m["content"][:80] for m in historial if m["role"] == "user"), "Conversación"
+        )
+        guardar_sesion(restaurante["id"], titulo, historial)
+    st.session_state["chat_historial"] = []
+    st.rerun()
 
 
 def _procesar(restaurante: dict, pregunta: str):
