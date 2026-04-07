@@ -1,6 +1,6 @@
 streamlit
 supabase
-openai
+openai>=1.0.0
 python-dotenv
 bcrypt
 pandas
