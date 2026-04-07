@@ -608,8 +608,8 @@ def _dash_ventas(restaurante: dict):
         return
 
     df = pd.DataFrame(ventas)
-    df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True).dt.tz_convert("America/Bogota")
-    df["created_at"] = pd.to_datetime(df["created_at"], utc=True).dt.tz_convert("America/Bogota")
+    df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True, format="mixed").dt.tz_convert("America/Bogota")
+    df["created_at"] = pd.to_datetime(df["created_at"], utc=True, format="mixed").dt.tz_convert("America/Bogota")
     df["fecha"] = df["closed_at"].dt.date
     df["hora"] = df["created_at"].dt.hour
     df["total"] = df["total"].astype(float)
