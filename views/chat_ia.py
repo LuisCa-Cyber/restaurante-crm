@@ -39,6 +39,7 @@ def _panel_chat(restaurante: dict):
         st.markdown("")
         if st.button("🔄 Nuevo chat", use_container_width=True):
             _guardar_y_limpiar(restaurante)
+            st.rerun()
 
     if not st.session_state["chat_historial"]:
         st.markdown("**Puedes preguntarme cosas como:**")
@@ -93,7 +94,7 @@ def _panel_historial(restaurante: dict):
             with col_c:
                 if st.button("Cargar", key=f"cargar_{s['id']}", use_container_width=True):
                     _guardar_y_limpiar(restaurante)
-                    st.session_state["chat_historial"] = mensajes
+                    st.session_state["chat_historial"] = list(mensajes)
                     st.rerun()
             with col_e:
                 if st.button("🗑️", key=f"del_{s['id']}", use_container_width=True,
@@ -112,7 +113,6 @@ def _guardar_y_limpiar(restaurante: dict):
         )
         guardar_sesion(restaurante["id"], titulo, historial)
     st.session_state["chat_historial"] = []
-    st.rerun()
 
 
 def _procesar(restaurante: dict, pregunta: str):
