@@ -92,24 +92,25 @@ def _vista_mesas(restaurante: dict, mesero: dict):
                 with st.container(border=True):
                     st.markdown(f"### {mesa['name']}")
                     if ocupada and orden:
+                        es_mi_mesa = orden["waiter_id"] == mesero["id"]
                         st.markdown("🔴 Ocupada")
                         st.caption(f"Mesero: {orden['waiter_name']}")
                         items = obtener_items_orden(orden["id"])
                         st.caption(f"{len(items)} item(s)")
 
-                        if st.button("Ver / Agregar", key=f"ver_{mesa['id']}",
-                                     use_container_width=True):
-                            st.session_state["mesa_activa"] = mesa
-                            st.session_state["orden_activa_id"] = orden["id"]
-                            st.session_state["vista_mesero"] = "orden"
-                            st.rerun()
-
-                        # Solo el mesero que atiende la mesa puede liberarla
-                        if orden["waiter_id"] == mesero["id"]:
+                        if es_mi_mesa:
+                            if st.button("Ver / Agregar", key=f"ver_{mesa['id']}",
+                                         use_container_width=True):
+                                st.session_state["mesa_activa"] = mesa
+                                st.session_state["orden_activa_id"] = orden["id"]
+                                st.session_state["vista_mesero"] = "orden"
+                                st.rerun()
                             if st.button("🚫 Liberar mesa", key=f"liberar_{mesa['id']}",
                                          use_container_width=True):
                                 cancelar_orden(orden["id"], mesa["id"])
                                 st.rerun()
+                        else:
+                            st.caption("🔒 Mesa de otro mesero")
                     else:
                         st.markdown("🟢 Disponible")
                         if st.button("Atender", key=f"atender_{mesa['id']}",
@@ -132,6 +133,17 @@ def _vista_orden(restaurante: dict, mesero: dict):
     order_id = st.session_state.get("orden_activa_id")
 
     if not mesa or not order_id:
+        return
+
+    # Verificar que esta orden pertenece al mesero activo
+    orden = obtener_orden_abierta_de_mesa(mesa["id"])
+    if orden and orden["waiter_id"] != mesero["id"]:
+        st.warning(f"🔒 Esta mesa está siendo atendida por **{orden['waiter_name']}**. No puedes modificarla.")
+        if st.button("← Volver a mesas"):
+            st.session_state["vista_mesero"] = "mesas"
+            st.session_state["mesa_activa"] = None
+            st.session_state["orden_activa_id"] = None
+            st.rerun()
         return
 
     st.markdown(f"## Orden — {mesa['name']}")
