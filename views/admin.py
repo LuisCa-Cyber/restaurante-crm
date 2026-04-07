@@ -7,6 +7,7 @@ from datetime import date, timedelta, datetime, timezone
 
 from utils.auth import verificar_password_admin
 from views.stock_ui import mostrar_stock, mostrar_analisis_stock
+from views.chat_ia import mostrar_chat
 from database.menu import (
     obtener_todos_los_platos, crear_plato, actualizar_plato,
     eliminar_plato, toggle_disponible, toggle_plato_del_dia, actualizar_imagen
@@ -56,6 +57,12 @@ MODULOS = [
         "icon": "📊",
         "nombre": "Dashboards",
         "desc": "Ventas, métricas de stock y reportes por período",
+    },
+    {
+        "key": "chat",
+        "icon": "🤖",
+        "nombre": "Asistente IA",
+        "desc": "Pregunta sobre ventas, stock y meseros en lenguaje natural",
     },
 ]
 
@@ -144,6 +151,8 @@ def _vista_modulo(restaurante: dict, modulo: str):
         _tab_stock(restaurante)
     elif modulo == "dashboard":
         _tab_dashboard(restaurante)
+    elif modulo == "chat":
+        mostrar_chat(restaurante)
 
 
 # ── Tab 1: Programación del día ───────────────────────────────────────────────
