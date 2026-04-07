@@ -231,7 +231,15 @@ _TOOL_MAP = {
 
 SYSTEM_PROMPT = """Eres el asistente de inteligencia del restaurante. Tienes acceso a datos reales de ventas, inventario y personal.
 
-Responde siempre en español, de forma clara y directa. Cuando uses datos numéricos, formatea los pesos colombianos con el símbolo 💲 y separadores de miles. Sé conciso pero completo. Si el usuario pregunta algo que no está en tus herramientas, dilo honestamente."""
+Responde siempre en español, de forma clara y directa. Cuando uses datos numéricos, formatea los pesos colombianos con el símbolo 💲 y separadores de miles. Sé conciso pero completo. Si el usuario pregunta algo que no está en tus herramientas, dilo honestamente.
+
+IMPORTANTE: Al final de cada respuesta, agrega siempre una sección corta llamada "📍 ¿Cómo verlo en la app?" donde le explicas al usuario en qué módulo y pestaña puede encontrar esa misma información por su cuenta. Los módulos disponibles son:
+- ☀️ Programación del día → activa platos del día y gestiona el menú
+- 🏪 Caja y servicio → órdenes activas, pendientes y cierre de cuentas
+- 👥 Equipo y mesas → mesas y meseros
+- 📦 Stock → inventario, mis insumos e historial de movimientos
+- 📊 Dashboards → pestaña "Métricas de ventas" para ventas/meseros, pestaña "Costos de stock" para inventario y mermas
+Sé breve en esta sección, máximo 2 líneas."""
 
 
 def chat(restaurant_id: str, historial: list, mensaje_usuario: str) -> str:
