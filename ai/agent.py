@@ -13,23 +13,36 @@ def _client():
 
 # ── Funciones que el agente puede llamar ─────────────────────────────────────
 
-def _ventas_resumen(restaurant_id: str, dias: int = 30) -> dict:
+def _rango_fechas(dias: int, fecha_desde: str | None, fecha_hasta: str | None):
+    """Retorna (desde_iso, hasta_iso). Fechas exactas tienen prioridad sobre dias."""
+    if fecha_desde:
+        desde = fecha_desde
+    else:
+        desde = (date.today() - timedelta(days=dias)).isoformat()
+    hasta = fecha_hasta or date.today().isoformat()
+    return desde, hasta
+
+
+def _ventas_resumen(restaurant_id: str, dias: int = 30,
+                    fecha_desde: str | None = None, fecha_hasta: str | None = None) -> dict:
     supabase = get_supabase()
-    desde = (date.today() - timedelta(days=dias)).isoformat()
+    desde, hasta = _rango_fechas(dias, fecha_desde, fecha_hasta)
     rows = (
         supabase.table("orders")
         .select("total, waiter_name, closed_at, table_name")
         .eq("restaurant_id", restaurant_id)
         .eq("status", "closed")
         .gte("closed_at", desde)
+        .lte("closed_at", hasta + "T23:59:59")
         .execute()
         .data
     )
     if not rows:
-        return {"mensaje": f"No hay ventas en los últimos {dias} días."}
+        return {"mensaje": f"No hay ventas entre {desde} y {hasta}."}
     totales = [float(r["total"]) for r in rows]
     return {
-        "periodo_dias": dias,
+        "periodo_desde": desde,
+        "periodo_hasta": hasta,
         "total_ventas": sum(totales),
         "mesas_atendidas": len(rows),
         "ticket_promedio": sum(totales) / len(totales),
@@ -38,15 +51,17 @@ def _ventas_resumen(restaurant_id: str, dias: int = 30) -> dict:
     }
 
 
-def _top_platos(restaurant_id: str, dias: int = 30, limite: int = 10) -> list:
+def _top_platos(restaurant_id: str, dias: int = 30, limite: int = 10,
+                fecha_desde: str | None = None, fecha_hasta: str | None = None) -> list:
     supabase = get_supabase()
-    desde = (date.today() - timedelta(days=dias)).isoformat()
+    desde, hasta = _rango_fechas(dias, fecha_desde, fecha_hasta)
     ordenes = (
         supabase.table("orders")
         .select("id")
         .eq("restaurant_id", restaurant_id)
         .eq("status", "closed")
         .gte("closed_at", desde)
+        .lte("closed_at", hasta + "T23:59:59")
         .execute()
         .data
     )
@@ -68,15 +83,17 @@ def _top_platos(restaurant_id: str, dias: int = 30, limite: int = 10) -> list:
     return [{"plato": k, "unidades_vendidas": v} for k, v in ordenado[:limite]]
 
 
-def _rendimiento_meseros(restaurant_id: str, dias: int = 30) -> list:
+def _rendimiento_meseros(restaurant_id: str, dias: int = 30,
+                         fecha_desde: str | None = None, fecha_hasta: str | None = None) -> list:
     supabase = get_supabase()
-    desde = (date.today() - timedelta(days=dias)).isoformat()
+    desde, hasta = _rango_fechas(dias, fecha_desde, fecha_hasta)
     rows = (
         supabase.table("orders")
         .select("waiter_name, total")
         .eq("restaurant_id", restaurant_id)
         .eq("status", "closed")
         .gte("closed_at", desde)
+        .lte("closed_at", hasta + "T23:59:59")
         .execute()
         .data
     )
@@ -125,14 +142,16 @@ def _stock_actual(restaurant_id: str) -> dict:
     }
 
 
-def _consumo_stock(restaurant_id: str, dias: int = 30) -> list:
+def _consumo_stock(restaurant_id: str, dias: int = 30,
+                   fecha_desde: str | None = None, fecha_hasta: str | None = None) -> list:
     supabase = get_supabase()
-    desde = (date.today() - timedelta(days=dias)).isoformat()
+    desde, hasta = _rango_fechas(dias, fecha_desde, fecha_hasta)
     movs = (
         supabase.table("stock_movements")
         .select("type, quantity, cost_per_unit, ingredients(name, unit)")
         .eq("restaurant_id", restaurant_id)
         .gte("created_at", desde)
+        .lte("created_at", hasta + "T23:59:59")
         .execute()
         .data
     )
@@ -157,18 +176,19 @@ def _consumo_stock(restaurant_id: str, dias: int = 30) -> list:
 
 # ── Definición de herramientas para OpenAI ───────────────────────────────────
 
+_FECHA_PROPS = {
+    "dias": {"type": "integer", "description": "Últimos N días. Usar solo si no se especifican fechas exactas. Por defecto 30."},
+    "fecha_desde": {"type": "string", "description": "Fecha de inicio en formato YYYY-MM-DD. Usar cuando el usuario mencione una fecha o rango específico."},
+    "fecha_hasta": {"type": "string", "description": "Fecha de fin en formato YYYY-MM-DD. Usar junto con fecha_desde."},
+}
+
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "ventas_resumen",
-            "description": "Resumen de ventas del restaurante: total facturado, mesas atendidas, ticket promedio, máximo y mínimo.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "dias": {"type": "integer", "description": "Últimos N días a analizar. Por defecto 30.", "default": 30}
-                },
-            },
+            "description": "Resumen de ventas: total facturado, mesas atendidas, ticket promedio, máximo y mínimo. Usar fecha_desde/fecha_hasta cuando el usuario pida un rango específico.",
+            "parameters": {"type": "object", "properties": _FECHA_PROPS},
         },
     },
     {
@@ -179,8 +199,8 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "dias": {"type": "integer", "description": "Últimos N días. Por defecto 30.", "default": 30},
-                    "limite": {"type": "integer", "description": "Cuántos platos mostrar. Por defecto 10.", "default": 10},
+                    **_FECHA_PROPS,
+                    "limite": {"type": "integer", "description": "Cuántos platos mostrar. Por defecto 10."},
                 },
             },
         },
@@ -190,12 +210,7 @@ TOOLS = [
         "function": {
             "name": "rendimiento_meseros",
             "description": "Ventas y mesas atendidas por mesero en un período.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "dias": {"type": "integer", "description": "Últimos N días. Por defecto 30.", "default": 30}
-                },
-            },
+            "parameters": {"type": "object", "properties": _FECHA_PROPS},
         },
     },
     {
@@ -210,13 +225,8 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "consumo_stock",
-            "description": "Qué insumos se han consumido y cuánto ha costado en un período. También muestra mermas/pérdidas.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "dias": {"type": "integer", "description": "Últimos N días. Por defecto 30.", "default": 30}
-                },
-            },
+            "description": "Qué insumos se han consumido y cuánto ha costado. También muestra mermas/pérdidas.",
+            "parameters": {"type": "object", "properties": _FECHA_PROPS},
         },
     },
 ]
@@ -248,8 +258,9 @@ def chat(restaurant_id: str, historial: list, mensaje_usuario: str) -> str:
     Retorna la respuesta del asistente como string.
     """
     client = _client()
+    hoy = date.today().isoformat()
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": f"{SYSTEM_PROMPT}\n\nFecha de hoy: {hoy}"}]
     messages += historial
     messages.append({"role": "user", "content": mensaje_usuario})
 
