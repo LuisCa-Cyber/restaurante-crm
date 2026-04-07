@@ -29,6 +29,12 @@ CATEGORIAS_PLATO_DIA = {"Sopas", "Plato del día", "Parrilla", "Adiciones", "Pos
 
 MODULOS = [
     {
+        "key": "equipo",
+        "icon": "👥",
+        "nombre": "Equipo y mesas",
+        "desc": "Configuración de mesas y gestión del personal",
+    },
+    {
         "key": "programacion",
         "icon": "☀️",
         "nombre": "Programación del día",
@@ -39,12 +45,6 @@ MODULOS = [
         "icon": "🏪",
         "nombre": "Caja y servicio",
         "desc": "Órdenes activas, pendientes de entrega y cierre de cuentas",
-    },
-    {
-        "key": "equipo",
-        "icon": "👥",
-        "nombre": "Equipo y mesas",
-        "desc": "Configuración de mesas y gestión del personal",
     },
     {
         "key": "stock",

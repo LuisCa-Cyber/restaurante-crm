@@ -5,3 +5,7 @@ __pycache__/
 .venv/
 venv/
 sql/
+
+# Presentación y scripts de generación (no subir a GitHub)
+*.pptx
+crear_presentacion.py
